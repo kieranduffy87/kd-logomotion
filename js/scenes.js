@@ -105,6 +105,45 @@ function tracked(ctx, text, x, y, spacing, align) {
 const paperOf = (tone) => (tone === "light" ? PALETTE.paper : PALETTE.ink);
 const inkOf = (tone) => (tone === "light" ? PALETTE.inkSoft : PALETTE.paperWhite);
 
+
+/* ---- colour helpers, for the scenes that key off the uploaded mark ---- */
+
+function hexToRgb(hex) {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function toHex(r, g, b) {
+  const c = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+  return `#${c(r)}${c(g)}${c(b)}`;
+}
+
+/* Negative darkens toward black, positive lifts toward white. */
+export function shade(hex, amount) {
+  const [r, g, b] = hexToRgb(hex);
+  const t = amount < 0 ? 0 : 255;
+  const k = Math.abs(amount);
+  return toHex(r + (t - r) * k, g + (t - g) * k, b + (t - b) * k);
+}
+
+function withAlpha(hex, a) {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/* Whichever of paper or ink actually survives on this colour. Relative
+   luminance, not lightness — a saturated blue is far darker than it looks. */
+export function readableOn(hex, tone) {
+  const [r, g, b] = hexToRgb(hex).map((v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const light = lum > 0.32;
+  if (tone === "dark") return light ? PALETTE.inkSoft : PALETTE.paperWhite;
+  return light ? PALETTE.inkSoft : PALETTE.paperWhite;
+}
+
 /* ------------------------------------------------------------------ plates */
 
 export const SCENES = [
@@ -605,6 +644,56 @@ export const SCENES = [
   },
 
   {
+    id: "brandfield",
+    name: "Brand field",
+    /* Keyed off the mark's own colours rather than the KD palette, so a reel
+       made from someone else's logo comes back in their brand, not mine. */
+    slot: { cx: 0.5, cy: 0.5, w: 0.6, h: 0.3 },
+    ink: (tone, g) => {
+      const base = g && g.brand ? g.brand[0] : PALETTE.blue;
+      return readableOn(base, tone);
+    },
+    draw(g) {
+      const { ctx, W, H, tone } = g;
+      const brand = (g.brand && g.brand[0]) || PALETTE.blue;
+      const second = (g.brand && g.brand[1]) || shade(brand, -0.45);
+
+      fill(g, tone === "light" ? brand : shade(brand, -0.62));
+      const glow = ctx.createRadialGradient(W * 0.5, H * 0.44, 0, W * 0.5, H * 0.44, W * 0.95);
+      glow.addColorStop(0, withAlpha(tone === "light" ? "#ffffff" : second, 0.22));
+      glow.addColorStop(1, withAlpha(shade(brand, -0.5), 0.35));
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, W, H);
+      addGrain(g, 0.05);
+    },
+  },
+
+  {
+    id: "brandbands",
+    name: "Brand bands",
+    slot: { cx: 0.5, cy: 0.5, w: 0.66, h: 0.3 },
+    lockBlend: "difference",
+    ink: () => PALETTE.white,
+    draw(g) {
+      const { ctx, W, H, tone } = g;
+      const brand = g.brand && g.brand.length ? g.brand : [PALETTE.blue];
+      /* Each brand colour, plus tints of the first, so a one-colour logo still
+         fills the frame with a ramp that belongs to it. */
+      const ramp = [];
+      for (let i = 0; i < 5; i++) {
+        ramp.push(brand[i] || shade(brand[0], -0.18 * (i - brand.length + 1) - 0.12 * i));
+      }
+      const bars = tone === "light" ? ramp : [...ramp].reverse();
+      const bh = H / bars.length;
+      bars.forEach((c, i) => {
+        ctx.fillStyle = c;
+        ctx.fillRect(0, i * bh, W, bh + 1);
+      });
+      addGrain(g, 0.05);
+    },
+  },
+
+  {
     id: "appicon",
     name: "App icon",
     /* The icon tile is centred so the locked mark lands inside it, which is the
@@ -691,11 +780,12 @@ export const SCENES = [
        path and the mark line up exactly. */
     slot: { cx: 0.5, cy: 0.5, w: 0.44, h: 0.24 },
     ink: (tone) => (tone === "light" ? PALETTE.inkSoft : PALETTE.paperWhite),
-    drawsOver: true,
+    /* Shown the way an editor shows it: outline only, no fill. */
+    hideMark: true,
     draw(g) {
       const { ctx, W, H, tone } = g;
       const light = tone === "light";
-      fill(g, light ? "#f7f8fa" : "#0b0d12");
+      fill(g, light ? "#ffffff" : "#0b0d12");
 
       const rule = light ? "rgba(14,15,18,0.07)" : "rgba(236,238,242,0.07)";
       const step = W / 20;
@@ -710,38 +800,27 @@ export const SCENES = [
       ctx.font = `600 ${Math.round(W * 0.021)}px ${FONT}`;
       ctx.textBaseline = "middle";
       tracked(ctx, "OUTLINE", W * 0.08, H * 0.08, W * 0.006, "left");
-      tracked(ctx, `${(g.anchorCount || 0)} ANCHORS`, W * 0.92, H * 0.08, W * 0.006, "right");
+      tracked(ctx, `${g.anchorCount || 0} ANCHORS`, W * 0.92, H * 0.08, W * 0.006, "right");
     },
 
-    /* Runs after the mark is stamped, so anchors sit on top of the artwork. */
+    /* Runs after the mark is stamped, so the path sits on top of the artwork. */
     over(g) {
-      const { ctx, W, H, tone, box, contour } = g;
+      const { ctx, W, H, tone, box, paths } = g;
       if (!box) return;
       const accent = PALETTE.blue;
       const light = tone === "light";
+      const stroke = light ? "#1a1a1a" : "#d8dae0";
 
-      /* Selection bounds with corner and edge handles. */
+      const px = (x) => box.x + x * box.w;
+      const py = (y) => box.y + y * box.h;
+
       ctx.save();
+
+      /* Dimension guides out to the margins, kept faint. */
       ctx.strokeStyle = accent;
-      ctx.lineWidth = Math.max(1, W * 0.0018);
-      ctx.strokeRect(box.x, box.y, box.w, box.h);
-
-      const handle = W * 0.011;
-      const pts = [
-        [box.x, box.y], [box.x + box.w / 2, box.y], [box.x + box.w, box.y],
-        [box.x + box.w, box.y + box.h / 2], [box.x + box.w, box.y + box.h],
-        [box.x + box.w / 2, box.y + box.h], [box.x, box.y + box.h],
-        [box.x, box.y + box.h / 2],
-      ];
-      pts.forEach(([x, y]) => {
-        ctx.fillStyle = light ? "#ffffff" : "#0b0d12";
-        ctx.fillRect(x - handle / 2, y - handle / 2, handle, handle);
-        ctx.strokeRect(x - handle / 2, y - handle / 2, handle, handle);
-      });
-
-      /* Dimension lines out to the margins. */
+      ctx.globalAlpha = 0.28;
+      ctx.lineWidth = Math.max(1, W * 0.0012);
       ctx.setLineDash([W * 0.012, W * 0.01]);
-      ctx.globalAlpha = 0.6;
       ctx.beginPath();
       ctx.moveTo(0, box.y); ctx.lineTo(W, box.y);
       ctx.moveTo(0, box.y + box.h); ctx.lineTo(W, box.y + box.h);
@@ -751,57 +830,52 @@ export const SCENES = [
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
 
-      /* The mark's own outline, recovered from its alpha, with an anchor on
-         every nth segment and a short tangent handle through it. */
-      if (contour && contour.length) {
-        const every = Math.max(1, Math.round(contour.length / 46));
-        ctx.strokeStyle = accent;
-        ctx.lineWidth = Math.max(1, W * 0.0016);
-        ctx.globalAlpha = 0.85;
+      if (!paths || !paths.length) { ctx.restore(); return; }
+
+      /* The path itself: a hairline, the way an outline preview looks. */
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = Math.max(1.5, W * 0.003);
+      ctx.lineJoin = "miter";
+      paths.forEach((pts) => {
         ctx.beginPath();
-        contour.forEach(([x0, y0, x1, y1]) => {
-          ctx.moveTo(box.x + x0 * box.w, box.y + y0 * box.h);
-          ctx.lineTo(box.x + x1 * box.w, box.y + y1 * box.h);
-        });
+        pts.forEach(([x, y], i) => (i ? ctx.lineTo(px(x), py(y)) : ctx.moveTo(px(x), py(y))));
+        /* Only close a chain that actually came back to its start. */
+        const a = pts[0], b = pts[pts.length - 1];
+        if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.04) ctx.closePath();
         ctx.stroke();
-        ctx.globalAlpha = 1;
+      });
 
-        const a = W * 0.0085;
-        contour.forEach((seg, i) => {
-          if (i % every) return;
-          const px = box.x + seg[0] * box.w;
-          const py = box.y + seg[1] * box.h;
-          const qx = box.x + seg[2] * box.w;
-          const qy = box.y + seg[3] * box.h;
+      const anchor = W * 0.014;
+      const mid = W * 0.0092;
 
-          const dx = qx - px, dy = qy - py;
-          const len = Math.hypot(dx, dy) || 1;
-          const hx = (dx / len) * W * 0.026;
-          const hy = (dy / len) * W * 0.026;
+      paths.forEach((pts) => {
+        /* Midpoint markers — the ring-and-dot an editor puts halfway along a
+           segment, where a new point would be inserted. */
+        for (let i = 0; i < pts.length - 1; i++) {
+          const a = pts[i];
+          const b = pts[i + 1];
+          const mx = px((a[0] + b[0]) / 2);
+          const my = py((a[1] + b[1]) / 2);
 
-          ctx.strokeStyle = accent;
-          ctx.globalAlpha = 0.7;
-          ctx.lineWidth = Math.max(1, W * 0.0012);
-          ctx.beginPath();
-          ctx.moveTo(px - hx, py - hy);
-          ctx.lineTo(px + hx, py + hy);
-          ctx.stroke();
-          ctx.globalAlpha = 1;
-
-          /* Handle ends, then the anchor itself sitting on the path. */
-          ctx.fillStyle = accent;
-          [[px - hx, py - hy], [px + hx, py + hy]].forEach(([cx, cy]) => {
-            ctx.beginPath();
-            ctx.arc(cx, cy, a * 0.45, 0, Math.PI * 2);
-            ctx.fill();
-          });
-          ctx.fillStyle = light ? "#ffffff" : "#0b0d12";
-          ctx.fillRect(px - a / 2, py - a / 2, a, a);
           ctx.strokeStyle = accent;
           ctx.lineWidth = Math.max(1, W * 0.0016);
-          ctx.strokeRect(px - a / 2, py - a / 2, a, a);
+          ctx.beginPath();
+          ctx.arc(mx, my, mid, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.fillStyle = accent;
+          ctx.beginPath();
+          ctx.arc(mx, my, mid * 0.32, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        /* Anchors — solid squares, corners only. */
+        ctx.fillStyle = accent;
+        pts.forEach(([x, y]) => {
+          ctx.fillRect(px(x) - anchor / 2, py(y) - anchor / 2, anchor, anchor);
         });
-      }
+      });
+
       ctx.restore();
     },
   },

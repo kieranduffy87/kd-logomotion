@@ -5,7 +5,7 @@ import { SCENES, defaultFrames, makeFrame, makePlateFrame, frameLabel, PALETTE }
 import { PLATES, loadPlatesFor, onPlateLoad } from "./plates.js";
 import {
   BEDS, BED_BY_ID, renderBed, decodeFile, detectBpm,
-  holdForBpm, SUBDIVISIONS, fitBuffer, audioContext,
+  holdForBpm, SUBDIVISIONS, fitBuffer, audioContext, beatPhase, beatTimes,
 } from "./audio.js";
 import { renderThumb, renderFrame, FRAME_W, FRAME_H, FX_DEFAULT, fxString } from "./compositor.js";
 import { Player, SPEEDS, formatTime } from "./player.js";
@@ -16,6 +16,7 @@ const $ = (id) => document.getElementById(id);
 const model = {
   logo: null,
   frames: defaultFrames(),
+  cuts: null,          /* per-frame cut times in ms when locked to a track */
   placement: { scale: 1, dx: 0, dy: 0, rotate: 0 },
   audio: null,          /* AudioBuffer fitted to the reel, or null */
   custom: new Map(),    /* id -> Image, backgrounds dropped onto single frames */
@@ -239,15 +240,38 @@ function currentBpm() {
   return bed ? bed.bpm : null;
 }
 
+/* Cut times, taken from the music rather than a metronome.
+
+   Knowing the tempo is only half of it: a grid at the right BPM but the wrong
+   phase puts every cut exactly off the beat. So an uploaded track is analysed
+   for where its downbeat actually falls and the cuts hang off that. The beds
+   are synthesised from zero, so their phase is already known. */
+function rebuildCuts() {
+  const bpm = currentBpm();
+  if (!bpm) { model.cuts = null; return; }
+
+  const sub = SUBDIVISIONS.reduce((best, cand) => {
+    const d = Math.abs(holdForBpm(bpm, cand.id) - player.holdMs);
+    return !best || d < best.d ? { id: cand.id, d } : best;
+  }, null);
+
+  const phase = userTrack ? beatPhase(userTrack, bpm) : 0;
+  const step = holdForBpm(bpm, sub ? sub.id : 1);
+  const span = ((model.frames.length + 1) * step) / 1000;
+  const times = beatTimes(bpm, sub ? sub.id : 1, phase, span);
+  model.cuts = model.frames.map((_, i) => Math.round((times[i] != null ? times[i] : i * step / 1000) * 1000));
+}
+
 async function rebuildAudio() {
+  rebuildCuts();
   /* Match the exported length, not the nominal one: the frame schedule rounds
      the reel to whole frames, and the bed has to end where the picture does. */
-  const seconds = estimate(model.frames.length, player.holdMs).seconds;
+  const seconds = estimate(model.frames.length, player.holdMs, model.cuts).seconds;
   if (userTrack) model.audio = fitBuffer(userTrack, seconds);
   else if (bedId) model.audio = await renderBed(bedId, BED_BY_ID[bedId].bpm, seconds);
   else model.audio = null;
   syncBedNote();
-  syncExportNote();
+  syncTransport();
 }
 
 function syncBedChips() {
@@ -278,6 +302,7 @@ BEDS.forEach((bed) => {
   b.addEventListener("click", async () => {
     bedId = bedId === bed.id && !userTrack ? null : bed.id;
     userTrack = null;
+    if (!bedId) model.cuts = null;
     syncBedChips();
     if (bedId) snapToBeat();
     await rebuildAudio();
@@ -379,7 +404,9 @@ function syncSpeedChips() {
 /* ------------------------------------------------------------ transport */
 
 const playBtn = $("playBtn");
-const scrub = $("scrub");
+const track = $("track");
+const trackCuts = $("trackCuts");
+const trackHead = $("trackHead");
 
 /* Preview audio rides alongside the rAF loop rather than driving it: the reel
    is already locked to the tempo, so starting the buffer at the playhead's
@@ -402,7 +429,7 @@ function startAudio() {
   audioNode.buffer = model.audio;
   audioNode.loop = true;
   audioNode.connect(ac.destination);
-  audioNode.start(0, (player.index * player.holdMs) / 1000);
+  audioNode.start(0, player.timeAt(player.index) / 1000);
 }
 
 playBtn.addEventListener("click", () => {
@@ -413,30 +440,81 @@ playBtn.addEventListener("click", () => {
   else stopAudio();
 });
 
-scrub.addEventListener("input", () => {
+/* ------------------------------------------------------------- timeline */
+
+function renderTrack() {
+  const cuts = player.cuts;
+  const total = player.duration || 1;
+  trackCuts.innerHTML = "";
+  cuts.forEach((t, i) => {
+    const tick = document.createElement("span");
+    tick.className = "track__cut";
+    tick.style.left = `${(t / total) * 100}%`;
+    tick.dataset.index = String(i);
+    trackCuts.appendChild(tick);
+  });
+  track.setAttribute("aria-valuemax", String(Math.max(0, cuts.length - 1)));
+  markTrack(player.index);
+}
+
+function markTrack(index) {
+  const total = player.duration || 1;
+  [...trackCuts.children].forEach((el, i) => {
+    el.classList.toggle("is-past", i < index);
+    el.classList.toggle("is-current", i === index);
+  });
+  trackHead.style.left = `${(player.timeAt(index) / total) * 100}%`;
+  track.setAttribute("aria-valuenow", String(index));
+  track.setAttribute("aria-valuetext",
+    `Frame ${index + 1} of ${player.cuts.length}, ${frameLabel(model.frames[index] || {})}`);
+}
+
+/* Scrubbing picks the nearest cut, so the playhead can only ever land on a
+   frame boundary — there is no meaningful position between two cuts. */
+function scrubTo(clientX) {
+  const rect = track.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  const ms = ratio * (player.duration || 1);
   player.pause();
   playBtn.classList.remove("is-playing");
-  playBtn.setAttribute("aria-label", "Play");
-  player.seek(Number(scrub.value));
+  stopAudio();
+  player.seek(player.indexAt(ms));
+}
+
+let scrubbing = false;
+track.addEventListener("pointerdown", (e) => {
+  scrubbing = true;
+  track.setPointerCapture(e.pointerId);
+  scrubTo(e.clientX);
+});
+track.addEventListener("pointermove", (e) => { if (scrubbing) scrubTo(e.clientX); });
+["pointerup", "pointercancel"].forEach((t) =>
+  track.addEventListener(t, (e) => {
+    scrubbing = false;
+    try { track.releasePointerCapture(e.pointerId); } catch (_) {}
+  })
+);
+track.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") { e.preventDefault(); player.seek(player.index + 1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); player.seek(player.index - 1); }
 });
 
 function syncTransport() {
   const n = model.frames.length;
-  scrub.max = String(Math.max(0, n - 1));
-  scrub.value = String(player.index);
-  $("tNow").textContent = formatTime(player.index * player.holdMs);
+  $("tNow").textContent = formatTime(player.timeAt(player.index));
   $("tEnd").textContent = formatTime(player.duration);
   const f = model.frames[player.index];
   $("frameName").textContent = f ? frameLabel(f) : "—";
   $("frameCount").textContent = `${n} frame${n === 1 ? "" : "s"}`;
+  renderTrack();
   syncExportNote();
 }
 
 player.onTick = (i) => {
-  scrub.value = String(i);
-  $("tNow").textContent = formatTime(i * player.holdMs);
+  $("tNow").textContent = formatTime(player.timeAt(i));
   const f = model.frames[i];
   $("frameName").textContent = f ? frameLabel(f) : "—";
+  markTrack(i);
   markCurrent(i);
 };
 
@@ -823,7 +901,7 @@ const exportBar = exportBtn.querySelector(".export__bar");
 const exportLabel = exportBtn.querySelector(".export__label");
 
 function syncExportNote() {
-  const est = estimate(model.frames.length, player.holdMs);
+  const est = estimate(model.frames.length, player.holdMs, model.cuts);
   const mp4 = canEncodeMp4() && window.Mp4Muxer;
   const bits = [`1080 × 1920`, `${est.seconds.toFixed(1)}s`, mp4 ? "MP4" : "WebM"];
   if (model.audio) bits.push(mp4 ? "with sound" : "sound needs MP4");

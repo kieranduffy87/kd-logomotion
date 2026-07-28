@@ -19,8 +19,8 @@ export class Player {
     this.playing = false;
     this.holdMs = 180;
     this._raf = 0;
-    this._last = 0;
-    this._acc = 0;
+    this._startedAt = 0;
+    this._startedFrom = 0;
     this.onTick = null;
   }
 
@@ -28,8 +28,32 @@ export class Player {
     return this.getModel().frames;
   }
 
+  /* When the reel is locked to a track, the model carries the time of every
+     cut in milliseconds and the spacing is whatever the music does. Without
+     one, cuts fall on a plain fixed interval. */
+  get cuts() {
+    const m = this.getModel();
+    if (m.cuts && m.cuts.length === m.frames.length) return m.cuts;
+    return m.frames.map((_, i) => i * this.holdMs);
+  }
+
   get duration() {
-    return this.frames.length * this.holdMs;
+    const cuts = this.cuts;
+    if (!cuts.length) return 0;
+    const tail = cuts.length > 1 ? cuts[cuts.length - 1] - cuts[cuts.length - 2] : this.holdMs;
+    return cuts[cuts.length - 1] + tail;
+  }
+
+  timeAt(index) {
+    const cuts = this.cuts;
+    return cuts[Math.max(0, Math.min(cuts.length - 1, index))] || 0;
+  }
+
+  indexAt(ms) {
+    const cuts = this.cuts;
+    let i = 0;
+    while (i + 1 < cuts.length && cuts[i + 1] <= ms) i++;
+    return i;
   }
 
   draw() {
@@ -46,7 +70,10 @@ export class Player {
     const n = this.frames.length;
     if (!n) return;
     this.index = ((index % n) + n) % n;
-    this._acc = 0;
+    if (this.playing) {
+      this._startedAt = performance.now();
+      this._startedFrom = this.timeAt(this.index);
+    }
     this.draw();
     if (notify && this.onTick) this.onTick(this.index);
   }
@@ -65,17 +92,20 @@ export class Player {
   play() {
     if (this.playing || this.frames.length < 2) return;
     this.playing = true;
-    this._last = performance.now();
-    this._acc = 0;
+    this._startedAt = performance.now();
+    this._startedFrom = this.timeAt(this.index);
+
+    /* Driven off elapsed wall-clock rather than an accumulator, so a dropped
+       frame cannot push the picture out of step with the audio. */
     const step = (now) => {
       if (!this.playing) return;
-      const dt = now - this._last;
-      this._last = now;
-      this._acc += dt;
-      if (this._acc >= this.holdMs) {
-        const advance = Math.floor(this._acc / this.holdMs);
-        this._acc -= advance * this.holdMs;
-        this.seek(this.index + advance);
+      const total = this.duration || 1;
+      const elapsed = (this._startedFrom + (now - this._startedAt)) % total;
+      const next = this.indexAt(elapsed);
+      if (next !== this.index) {
+        this.index = next;
+        this.draw();
+        if (this.onTick) this.onTick(this.index);
       }
       this._raf = requestAnimationFrame(step);
     };

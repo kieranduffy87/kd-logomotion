@@ -37,19 +37,28 @@ async function pickCodec(width, height) {
    long, which slides the picture off the beat. Instead each cut is held to
    whichever frame boundary is nearest its *cumulative* ideal time, so cut
    lengths alternate by a frame and the error never accumulates. */
-export function frameSchedule(frameCount, holdMs) {
+export function frameSchedule(frameCount, holdMs, cuts) {
   const holds = [];
   let emitted = 0;
+
+  /* When the reel is locked to a track the cut times are uneven, and each
+     frame runs until the next one. Falling back to a fixed interval covers
+     the silent case. */
+  const timeOf = (i) =>
+    cuts && cuts.length === frameCount
+      ? (i < frameCount ? cuts[i] : cuts[frameCount - 1] + (cuts[frameCount - 1] - cuts[frameCount - 2] || holdMs))
+      : i * holdMs;
+
   for (let i = 0; i < frameCount; i++) {
-    const target = Math.max(emitted + 1, Math.round(((i + 1) * holdMs / 1000) * FPS));
+    const target = Math.max(emitted + 1, Math.round((timeOf(i + 1) / 1000) * FPS));
     holds.push(target - emitted);
     emitted = target;
   }
   return { holds, ticks: emitted };
 }
 
-export function estimate(frameCount, holdMs) {
-  const { ticks } = frameSchedule(frameCount, holdMs);
+export function estimate(frameCount, holdMs, cuts) {
+  const { ticks } = frameSchedule(frameCount, holdMs, cuts);
   return { ticks, seconds: ticks / FPS };
 }
 
@@ -137,7 +146,7 @@ async function encodeMp4(model, holdMs, onProgress, signal) {
   canvas.height = FRAME_H;
   const ctx = canvas.getContext("2d", { alpha: false });
 
-  const { holds, ticks: total } = frameSchedule(model.frames.length, holdMs);
+  const { holds, ticks: total } = frameSchedule(model.frames.length, holdMs, model.cuts);
   let tick = 0;
 
   try {

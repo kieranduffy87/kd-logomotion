@@ -258,6 +258,60 @@ export function detectBpm(buffer) {
   return Math.round(bpm);
 }
 
+/* Where the beats actually fall.
+
+   Knowing the tempo is not the same as knowing the downbeat: a grid at the
+   right BPM but the wrong phase puts every cut exactly off the beat. So the
+   onset envelope is correlated against a pulse train at each candidate offset
+   and the best-scoring phase wins. The cuts then hang off that grid, which is
+   what makes the picture change *with* the music rather than merely at the
+   same rate. */
+export function beatPhase(buffer, bpm) {
+  const sr = buffer.sampleRate;
+  const mono = buffer.getChannelData(0);
+  const hop = 512;
+  const frames = Math.floor(mono.length / hop);
+  if (frames < 32) return 0;
+
+  const flux = new Float32Array(frames);
+  let prev = 0;
+  for (let f = 0; f < frames; f++) {
+    let sum = 0;
+    const start = f * hop;
+    for (let i = 0; i < hop; i++) sum += Math.abs(mono[start + i] || 0);
+    const e = sum / hop;
+    flux[f] = Math.max(0, e - prev);
+    prev = e;
+  }
+
+  const fps = sr / hop;
+  const period = (60 / bpm) * fps;
+  let best = -1, bestPhase = 0;
+  const steps = Math.max(8, Math.round(period));
+  for (let s = 0; s < steps; s++) {
+    const phase = (s / steps) * period;
+    let score = 0;
+    for (let b = 0; ; b++) {
+      const idx = Math.round(phase + b * period);
+      if (idx >= frames) break;
+      score += flux[idx];
+    }
+    if (score > best) { best = score; bestPhase = phase; }
+  }
+  return bestPhase / fps;
+}
+
+/* Cut times across the whole reel, from a tempo, a phase and a subdivision. */
+export function beatTimes(bpm, subdivision, offset, seconds) {
+  const step = (60 / bpm) / (subdivision || 1);
+  const times = [];
+  /* Back up so the reel opens on a cut rather than part-way through one. */
+  let t = offset;
+  while (t - step > -1e-6) t -= step;
+  for (; t < seconds - 1e-6; t += step) times.push(Math.max(0, t));
+  return times.length ? times : [0];
+}
+
 export async function decodeFile(file) {
   const buf = await file.arrayBuffer();
   return audioContext().decodeAudioData(buf);

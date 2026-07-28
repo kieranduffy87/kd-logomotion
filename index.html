@@ -115,7 +115,12 @@
         <svg class="i-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
       </button>
       <span class="tc" id="tNow">0:00</span>
-      <input type="range" class="scrub" id="scrub" min="0" max="27" step="1" value="0" aria-label="Timeline">
+      <div class="track" id="track" role="slider" tabindex="0"
+           aria-label="Timeline" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+        <span class="track__line" aria-hidden="true"></span>
+        <div class="track__cuts" id="trackCuts" aria-hidden="true"></div>
+        <div class="track__head" id="trackHead" aria-hidden="true"><span class="track__knob"></span></div>
+      </div>
       <span class="tc" id="tEnd">0:05</span>
       <span class="transport__label" id="frameName">Warm paper</span>
     </div>

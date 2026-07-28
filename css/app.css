@@ -543,3 +543,62 @@ body {
 /* A file input dressed as a chip, so "use my image" sits beside the other
    background controls instead of looking like a form field. */
 .kd-chip--file { cursor: pointer; }
+
+/* ------------------------------------------------------------- timeline
+
+   A tick per cut rather than a plain slider: the reel's rhythm is the thing
+   being edited, so the control should show where every cut falls. When the
+   reel is locked to a track the ticks are unevenly spaced, and that spacing
+   is the music. */
+
+.track {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  height: 22px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.track__line {
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: 1px;
+  background: var(--kd-line);
+}
+
+.track__cuts { position: absolute; inset: 0; }
+
+.track__cut {
+  position: absolute;
+  top: 4px;
+  width: 1px;
+  height: 14px;
+  background: var(--kd-line);
+  transition: background var(--kd-t-fast) var(--kd-ease), height var(--kd-t-fast) var(--kd-ease);
+}
+.track__cut.is-past { background: color-mix(in srgb, var(--kd-text) 42%, transparent); }
+.track__cut.is-current {
+  background: var(--kd-blue);
+  top: 1px;
+  height: 20px;
+}
+
+.track__head {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 2px;
+  background: var(--kd-text);
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+.track__knob {
+  position: absolute;
+  top: -3px; left: 50%;
+  width: 8px; height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--kd-text);
+}
+
+.track:focus-visible { outline: 3px solid var(--kd-blue); outline-offset: 4px; border-radius: 4px; }

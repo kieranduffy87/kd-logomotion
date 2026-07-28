@@ -50,13 +50,26 @@ KD tokens rather than photographed:
 **App icon** puts the mark inside a centred home-screen tile — the tile has to
 be wider than the lock box or the mark hangs over its corners.
 
-**Vector view** shows the mark the way an editor would: selection bounds with
-handles, dimension guides, and anchor points sitting on its actual outline. A
-dropped PNG has no path to read, so the outline is recovered from the alpha
-channel by marching squares (`contourSegments` in `js/logo.js`). The segments
-are deliberately left unchained — drawn as short strokes with anchors at their
-ends they are indistinguishable from a traced path, and it skips all the
-bookkeeping of stitching loops together.
+**Vector view** shows the mark the way an editor would: its outline hairlined
+with no fill, square anchors on the corners, ring-and-dot markers at segment
+midpoints, and dimension guides out to the margins.
+
+A dropped PNG has no path to read, so the outline is recovered from the alpha
+channel by a Moore-neighbour boundary walk (`traceContours` in `js/logo.js`),
+then reduced with Douglas–Peucker so only real corners survive. Marching
+squares was the first attempt and it is the wrong primitive here: it emits an
+unordered cloud of segments that has to be stitched back together, and it
+fragments wherever a contour branches — which is exactly what happens where
+two shapes of a mark meet at a point, as the KD mark's do. Walking the
+boundary yields one ordered closed loop per shape, every time.
+
+Two things worth knowing if you touch this. Douglas–Peucker degenerates on a
+closed loop, because the baseline from first point to last has zero length —
+closed contours are cut at their two furthest-apart points and simplified as
+two halves. And contours must be ranked by how much outline they cover, not by
+how many corners they reduce to: a four-vertex speck of antialiasing has more
+vertices than a clean triangle reduced to three corners, so ranking on the
+output lets the speck win and drops the real shape.
 
 A plate declares a `slot` — the box the mark is stamped into, in 0..1 of the
 frame — or sets `slot: null` and places the mark itself via `g.stamp()`, which
@@ -117,11 +130,31 @@ frame's own adjustments ride on top rather than being overwritten. For a single
 frame, drag straight on the preview: drag to move, wheel to size, shift-drag to
 rotate.
 
+**Brand colour** — the palette is pulled off the uploaded mark (top colours by
+coverage, with near-white and near-black dropped since those are almost always
+the artwork's ground rather than a brand colour). The *Brand field* and *Brand
+bands* scenes key off it, so a reel made from someone else's logo comes back in
+their colours rather than mine. Ink is chosen by relative luminance, not
+lightness — a saturated blue is far darker than it looks.
+
+**Timeline** — a tick per cut rather than a plain slider: the reel's rhythm is
+the thing being edited, so the control shows where every cut falls. Scrubbing
+snaps to a cut, because there is no meaningful position between two of them.
+When the reel is locked to a track the ticks are unevenly spaced, and that
+spacing *is* the music.
+
 **Sound** (`js/audio.js`) — four beds (Pulse, Snap, Strobe, Hum) synthesised in
 Web Audio at whatever tempo the reel is cutting at, so the cut lands on the
 beat with no drift and nothing to licence. Or drop in your own track and the
 tempo detector — onset flux plus autocorrelation over the envelope — finds its
-BPM and snaps the cut length to it. Beds are peak-limited to 0.89 because a
+BPM and snaps the cut length to it.
+
+Knowing the tempo is only half of it. A grid at the right BPM but the wrong
+phase puts every cut exactly *off* the beat, so the onset envelope is also
+correlated against a pulse train at each candidate offset and the best-scoring
+phase wins (`beatPhase`). The cuts then hang off that grid, which is what makes
+the picture change *with* the music rather than merely at the same rate. The
+exporter schedules from those cut times, so an uneven grid survives encoding. Beds are peak-limited to 0.89 because a
 layered kick and sub clip on the way into the AAC encoder.
 
 **Playback** (`js/player.js`) — 180ms per cut by default, so 24 frames run in

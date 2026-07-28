@@ -149,7 +149,7 @@ function analyse(data) {
     else buckets.set(key, { n: 1, r: data[i], g: data[i + 1], b: data[i + 2] });
   }
 
-  if (!n) return { mono: true, dominant: "#0339f8" };
+  if (!n) return { mono: true, dominant: "#0339f8", palette: [] };
 
   let modal = null;
   for (const b of buckets.values()) if (!modal || b.n > modal.n) modal = b;
@@ -177,7 +177,31 @@ function analyse(data) {
     if (best) dominant = rgbToHex(best.r / best.n, best.g / best.n, best.b / best.n);
   }
 
-  return { mono, dominant };
+  /* Top colours by coverage, for the scenes that key off the brand. Near-white
+     and near-black are dropped: they are almost always the artwork's ground
+     rather than a brand colour, and a palette of black and white is useless. */
+  const palette = [...buckets.values()]
+    .map((b) => ({ n: b.n, r: b.r / b.n, g: b.g / b.n, b: b.b / b.n }))
+    .filter((c) => {
+      const [, s2, l2] = rgbToHsl(c.r, c.g, c.b);
+      return l2 > 0.12 && l2 < 0.93 && s2 > 0.12;
+    })
+    .sort((a, b) => b.n - a.n);
+
+  const merged = [];
+  for (const c of palette) {
+    const near = merged.find((m) =>
+      Math.abs(m.r - c.r) + Math.abs(m.g - c.g) + Math.abs(m.b - c.b) < 80);
+    if (near) near.n += c.n;
+    else merged.push({ ...c });
+    if (merged.length >= 5) break;
+  }
+
+  return {
+    mono,
+    dominant,
+    palette: merged.map((c) => rgbToHex(c.r, c.g, c.b)),
+  };
 }
 
 function rgbToHex(r, g, b) {
@@ -189,67 +213,164 @@ function rgbToHex(r, g, b) {
 
    The construction scene wants to show the mark the way a vector editor does:
    its own outline, with anchor points sitting on it. A dropped PNG has no path
-   to read, so the outline is recovered from the alpha channel by marching
-   squares — every cell straddling the alpha threshold contributes one short
-   segment along the boundary.
+   to read, so the outline is recovered from the alpha channel.
 
-   The segments are deliberately left unchained. Drawing them as a scatter of
-   short strokes with anchors at their ends is visually identical to a path
-   outline, and skips all the bookkeeping of stitching loops together. */
+   This is a Moore-neighbour boundary walk rather than marching squares.
+   Marching squares emits a cloud of unordered segments that has to be stitched
+   back together, and it fragments wherever a contour branches — which is
+   exactly what happens where two shapes of a mark meet at a point. Walking the
+   boundary instead yields one ordered, closed loop per shape, every time. */
 
-const CONTOUR_GRID = 110;
+const CONTOUR_GRID = 150;
 
-function contourSegments(data, w, h) {
+/* Clockwise ring of neighbours, used to sweep around a pixel. */
+const RING = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+
+function traceContours(data, w, h) {
   const step = Math.max(1, Math.floor(Math.max(w, h) / CONTOUR_GRID));
-  const cols = Math.floor(w / step);
-  const rows = Math.floor(h / step);
+  const cols = Math.max(3, Math.floor(w / step));
+  const rows = Math.max(3, Math.floor(h / step));
 
-  /* Alpha, sampled onto the coarse grid. */
-  const a = new Float32Array((cols + 1) * (rows + 1));
-  for (let y = 0; y <= rows; y++) {
-    for (let x = 0; x <= cols; x++) {
-      const sx = Math.min(w - 1, x * step);
-      const sy = Math.min(h - 1, y * step);
-      a[y * (cols + 1) + x] = data[(sy * w + sx) * 4 + 3] / 255;
+  /* One-pixel empty margin, so a mark touching its own bounding box still has
+     a boundary to walk rather than running off the edge of the grid. */
+  const gw = cols + 2;
+  const gh = rows + 2;
+  const solid = new Uint8Array(gw * gh);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const sx = Math.min(w - 1, Math.round((x + 0.5) * step));
+      const sy = Math.min(h - 1, Math.round((y + 0.5) * step));
+      if (data[(sy * w + sx) * 4 + 3] > 127) solid[(y + 1) * gw + (x + 1)] = 1;
     }
   }
 
-  const at = (x, y) => a[y * (cols + 1) + x];
-  const T = 0.5;
-  /* Where along an edge the threshold falls, so the outline lands on the real
-     boundary rather than snapping to the grid. */
-  const lerp = (v0, v1) => {
-    const d = v1 - v0;
-    return Math.abs(d) < 1e-6 ? 0.5 : Math.max(0, Math.min(1, (T - v0) / d));
-  };
+  const filled = (x, y) => (x < 0 || y < 0 || x >= gw || y >= gh ? 0 : solid[y * gw + x]);
+  const seen = new Uint8Array(gw * gh);
+  const contours = [];
 
-  const segs = [];
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const tl = at(x, y), tr = at(x + 1, y), br = at(x + 1, y + 1), bl = at(x, y + 1);
-      const code = (tl > T ? 8 : 0) | (tr > T ? 4 : 0) | (br > T ? 2 : 0) | (bl > T ? 1 : 0);
-      if (code === 0 || code === 15) continue;
+  for (let y = 1; y < gh - 1; y++) {
+    for (let x = 1; x < gw - 1; x++) {
+      if (!filled(x, y) || seen[y * gw + x]) continue;
+      /* Only start on a boundary pixel — one with empty space to its left. */
+      if (filled(x - 1, y)) continue;
 
-      const top = [x + lerp(tl, tr), y];
-      const right = [x + 1, y + lerp(tr, br)];
-      const bottom = [x + lerp(bl, br), y + 1];
-      const left = [x, y + lerp(tl, bl)];
+      const contour = [];
+      let cx = x, cy = y;
+      let bx = x - 1, by = y;          /* the empty pixel we arrived from */
+      const startX = x, startY = y, startBx = bx, startBy = by;
 
-      const push = (p, q) => segs.push([p[0] / cols, p[1] / rows, q[0] / cols, q[1] / rows]);
+      for (let guard = 0; guard < gw * gh * 4; guard++) {
+        contour.push([cx, cy]);
+        seen[cy * gw + cx] = 1;
 
-      switch (code) {
-        case 1: case 14: push(left, bottom); break;
-        case 2: case 13: push(bottom, right); break;
-        case 3: case 12: push(left, right); break;
-        case 4: case 11: push(top, right); break;
-        case 6: case 9:  push(top, bottom); break;
-        case 7: case 8:  push(left, top); break;
-        case 5:          push(left, top); push(bottom, right); break;
-        case 10:         push(top, right); push(left, bottom); break;
+        /* Sweep clockwise from the backtrack until the next solid neighbour. */
+        let entry = RING.findIndex(([dx, dy]) => cx + dx === bx && cy + dy === by);
+        if (entry < 0) entry = 0;
+
+        let moved = false;
+        for (let k = 1; k <= 8; k++) {
+          const i = (entry + k) % 8;
+          const nx = cx + RING[i][0];
+          const ny = cy + RING[i][1];
+          if (filled(nx, ny)) {
+            const prev = RING[(i + 7) % 8];
+            bx = cx + prev[0];
+            by = cy + prev[1];
+            cx = nx; cy = ny;
+            moved = true;
+            break;
+          }
+        }
+        if (!moved) break;                                    /* isolated speck */
+        if (cx === startX && cy === startY && bx === startBx && by === startBy) break;
+      }
+
+      if (contour.length >= 8) {
+        /* Back to 0..1 of the mark's own box, dropping the margin. */
+        contours.push(contour.map(([px, py]) => [(px - 1) / cols, (py - 1) / rows]));
       }
     }
   }
-  return segs;
+  return contours;
+}
+
+/* Douglas–Peucker: keep the vertices that carry the shape, drop the rest. */
+function simplify(points, eps) {
+  if (points.length < 3) return points;
+  let maxD = 0, idx = 0;
+  const [ax, ay] = points[0];
+  const [bx, by] = points[points.length - 1];
+  const dx = bx - ax, dy = by - ay;
+  const denom = Math.hypot(dx, dy) || 1;
+
+  for (let i = 1; i < points.length - 1; i++) {
+    const [px, py] = points[i];
+    const d = Math.abs(dy * px - dx * py + bx * ay - by * ax) / denom;
+    if (d > maxD) { maxD = d; idx = i; }
+  }
+  if (maxD <= eps) return [points[0], points[points.length - 1]];
+  return [
+    ...simplify(points.slice(0, idx + 1), eps).slice(0, -1),
+    ...simplify(points.slice(idx), eps),
+  ];
+}
+
+/* Reduce a traced chain to the corners a designer would have drawn.
+
+   Douglas–Peucker, with one wrinkle: on a closed loop the baseline from the
+   first point to the last is zero-length, which degenerates and collapses the
+   shape. Closed chains are therefore cut at their two furthest-apart points
+   and simplified as two halves. */
+function reducePath(chain, eps) {
+  const pts = chain.slice();
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  const closed = Math.hypot(first[0] - last[0], first[1] - last[1]) < 1e-6;
+
+  if (!closed) return simplify(pts, eps);
+
+  pts.pop();
+  if (pts.length < 4) return pts;
+
+  let far = 0, farD = -1;
+  for (let i = 1; i < pts.length; i++) {
+    const d = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]);
+    if (d > farD) { farD = d; far = i; }
+  }
+  const a = simplify(pts.slice(0, far + 1), eps);
+  const b = simplify(pts.slice(far).concat([pts[0]]), eps);
+  return a.slice(0, -1).concat(b.slice(0, -1));
+}
+
+const SIMPLIFY_EPS = 0.02;   /* of the mark's own box — coarse, so corners win */
+
+const MAX_ANCHORS = 30;   /* a busy mark still has to read as a path */
+const MIN_CONTOUR = 12;   /* shorter chains are antialiasing, not a shape */
+
+function buildPaths(data, w, h) {
+  /* Rank by how much contour a chain actually covers, not by how many corners
+     it ends up with. A four-vertex speck of antialiasing has more vertices
+     than a clean triangle reduced to three corners, and sorting on the output
+     would let the speck win and the real shape get dropped.
+
+     Chains are kept open where they are open: a mark whose edges run off its
+     own bounding box, or two shapes meeting at a point, trace as several
+     polylines rather than one tidy loop. Drawing them as they are is honest
+     and looks right; forcing them closed is what distorts the outline. */
+  const ranked = traceContours(data, w, h)
+    .filter((chain) => chain.length >= MIN_CONTOUR)
+    .map((chain) => ({ length: chain.length, corners: reducePath(chain, SIMPLIFY_EPS) }))
+    .filter((r) => r.corners.length >= 2)
+    .sort((a, b) => b.length - a.length);
+
+  let total = 0;
+  const kept = [];
+  for (const r of ranked) {
+    if (total + r.corners.length > MAX_ANCHORS && kept.length) break;
+    kept.push(r.corners);
+    total += r.corners.length;
+  }
+  return kept;
 }
 
 /* --------------------------------------------------------------- the type */
@@ -264,7 +385,8 @@ class LogoAsset {
     this.dominant = meta.dominant;
     this.name = meta.name;
     this.inkable = meta.mono;      /* user-overridable from the UI */
-    this.contour = meta.contour || [];
+    this.paths = meta.paths || [];
+    this.palette = (meta.palette && meta.palette.length) ? meta.palette : [];
     this.placeholder = false;      /* true for the mark shipped as a demo */
     this._tints = new Map();
   }
@@ -342,9 +464,9 @@ export async function loadLogo(file) {
 
   const meta = analyse(frame.data);
   meta.name = file.name.replace(/\.[^.]+$/, "");
-  /* Contour off the trimmed mark, so its coordinates are already 0..1 of the
+  /* Paths off the trimmed mark, so their coordinates are already 0..1 of the
      box the compositor stamps into. */
-  meta.contour = contourSegments(octx.getImageData(0, 0, box.w, box.h).data, box.w, box.h);
+  meta.paths = buildPaths(octx.getImageData(0, 0, box.w, box.h).data, box.w, box.h);
   return new LogoAsset(out, meta);
 }
 

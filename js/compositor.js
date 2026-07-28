@@ -138,6 +138,11 @@ function slotBox(slot, W, H, scale, dx, dy) {
 /* Placement composes: the global control moves every frame at once, and a
    frame's own values ride on top of it. Scale multiplies so "everything 20%
    bigger" keeps each frame's relative sizing; offsets and rotation add. */
+function anchorTotal(logo) {
+  if (!logo || !logo.paths) return 0;
+  return logo.paths.reduce((n, p) => n + p.length, 0);
+}
+
 export function placementOf(frame, state) {
   const g = state.placement || {};
   return {
@@ -332,7 +337,8 @@ export function renderFrame(ctx, W, H, frame, state) {
 function renderSceneBackground(ctx, W, H, frame, state) {
   const scene = SCENE_BY_ID[frame.scene] || SCENE_BY_ID.paper;
   const logo = state.logo || null;
-  const ink = scene.ink ? scene.ink(frame.tone) : PALETTE.inkSoft;
+  const brand = logo && logo.palette.length ? logo.palette : null;
+  const ink = scene.ink ? scene.ink(frame.tone, { brand }) : PALETTE.inkSoft;
 
   ctx.save();
 
@@ -343,7 +349,8 @@ function renderSceneBackground(ctx, W, H, frame, state) {
     tone: frame.tone,
     dominant: logo ? logo.dominant : PALETTE.blue,
     logoName: logo ? logo.name : "",
-    anchorCount: logo && logo.contour ? logo.contour.length : 0,
+    anchorCount: anchorTotal(logo),
+    brand: logo && logo.palette.length ? logo.palette : null,
     /* Plates that lay the mark out themselves (tiles, marquee) use this. The
        frame's placement is folded into every stamp relative to its own box, so
        the editor's controls still mean something on those plates. */
@@ -396,9 +403,11 @@ function paintMark(ctx, W, H, frame, state, isCustom) {
   const tone = effectiveTone(frame);
   const scene = frame.plate || isCustom ? null : (SCENE_BY_ID[frame.scene] || SCENE_BY_ID.paper);
 
+  const brand = state.logo && state.logo.palette.length ? state.logo.palette : null;
+
   let ink;
   if (scene) {
-    ink = scene.ink ? scene.ink(tone) : PALETTE.inkSoft;
+    ink = scene.ink ? scene.ink(tone, { brand }) : PALETTE.inkSoft;
   } else if (frame.plate) {
     const plate = PLATE_BY_ID[frame.plate];
     const base = plate && plate.tone === "dark" ? PALETTE.paperWhite : PALETTE.inkSoft;
@@ -409,15 +418,19 @@ function paintMark(ctx, W, H, frame, state, isCustom) {
     ink = tone === "dark" ? PALETTE.inkSoft : PALETTE.paperWhite;
   }
 
-  stampLocked(ctx, W, H, frame, state, ink, scene && scene.lockBlend);
+  /* Outline mode: the scene draws the path itself, so stamping the filled
+     artwork underneath would bury it. */
+  if (!(scene && scene.hideMark)) {
+    stampLocked(ctx, W, H, frame, state, ink, scene && scene.lockBlend);
+  }
 
   if (scene && scene.over) {
     scene.over({
       ctx, W, H,
       tone,
       box: lockedRect(W, H, frame, state),
-      contour: state.logo ? state.logo.contour : null,
-      anchorCount: state.logo && state.logo.contour ? state.logo.contour.length : 0,
+      paths: state.logo ? state.logo.paths : null,
+      anchorCount: anchorTotal(state.logo),
     });
   }
 }
