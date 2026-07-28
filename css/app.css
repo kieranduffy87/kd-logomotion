@@ -1,0 +1,545 @@
+/* ============================================================
+   KD LOGOMOTION — editor chrome.
+   Everything visual comes from tokens.css / kd.css. This file only
+   lays out the three-column shell and the pieces kd.css has no
+   opinion on: the stage, the transport and the frame list.
+   ============================================================ */
+
+* { box-sizing: border-box; }
+
+/* Panels below use display:flex, which otherwise wins over the hidden attribute. */
+[hidden] { display: none !important; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--kd-bg);
+  color: var(--kd-text);
+  overflow: hidden;
+  transition: background var(--kd-t-theme) var(--kd-ease), color var(--kd-t-theme) var(--kd-ease);
+}
+
+/* ---------------------------------------------------------------- app bar */
+
+.app-bar {
+  height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kd-s4);
+  padding: 0 clamp(1rem, 2.5vw, 2rem);
+  border-bottom: 1px solid var(--kd-line);
+  background: var(--kd-surface);
+}
+
+.app-brand { display: flex; align-items: center; gap: 0.75rem; }
+.app-brand svg { width: 26px; height: auto; display: block; }
+.app-brand .ink { fill: var(--kd-text); transition: fill var(--kd-t-theme) var(--kd-ease); }
+.app-brand h1 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 500;
+  letter-spacing: var(--kd-track-display);
+}
+.app-bar__end { display: flex; align-items: center; gap: 0.6rem; }
+
+.kd-theme-toggle .icon-moon { display: none; }
+[data-theme="dark"] .kd-theme-toggle .icon-sun { display: none; }
+[data-theme="dark"] .kd-theme-toggle .icon-moon { display: block; }
+
+/* ------------------------------------------------------------------ shell */
+
+.app {
+  height: calc(100% - 68px);
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr) 340px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+}
+
+.rail {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--kd-s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--kd-s5);
+}
+/* Without this a tall frame list gets flex-shrunk to fit the rail, and its
+   rows spill out and paint over whatever sits below. Keep natural heights and
+   let the rail scroll instead. */
+.rail > * { flex: 0 0 auto; }
+
+.rail--left { border-right: 1px solid var(--kd-line); }
+.rail--right { border-left: 1px solid var(--kd-line); }
+
+.panel { display: flex; flex-direction: column; gap: var(--kd-s3); }
+.panel--flush { gap: var(--kd-s3); min-height: 0; }
+.note { font-size: 0.82rem; line-height: 1.5; margin: 0; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+/* --------------------------------------------------------------- dropzone */
+
+.drop {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: var(--kd-s5) var(--kd-s4);
+  border: 1px dashed var(--kd-line);
+  border-radius: var(--kd-radius);
+  background: var(--kd-surface);
+  cursor: pointer;
+  transition: border-color var(--kd-t-fast) var(--kd-ease),
+              background var(--kd-t-fast) var(--kd-ease);
+}
+.drop:hover, .drop:focus-within { border-color: var(--kd-blue); }
+.drop.is-over {
+  border-color: var(--kd-blue);
+  border-style: solid;
+  background: color-mix(in srgb, var(--kd-blue) 7%, var(--kd-surface));
+}
+.drop__arrow {
+  width: 2rem; height: 2rem;
+  display: grid; place-items: center;
+  border-radius: var(--kd-pill);
+  background: var(--kd-surface-2);
+  color: var(--kd-text);
+  margin-bottom: 0.3rem;
+}
+.drop__arrow svg { width: 15px; height: 15px; }
+.drop__title { font-size: 0.95rem; font-weight: 500; }
+.drop__hint { font-size: 0.76rem; color: var(--kd-muted); line-height: 1.45; }
+
+.logo-meta { display: flex; align-items: center; gap: 0.8rem; }
+.logo-meta__chip {
+  width: 52px; height: 52px;
+  flex: 0 0 auto;
+  display: grid; place-items: center;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-sm);
+  background: var(--kd-surface);
+  overflow: hidden;
+}
+.logo-meta__chip canvas { width: 40px; height: 40px; object-fit: contain; }
+.logo-meta__name {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 500;
+  word-break: break-word;
+}
+.logo-meta__dims { margin: 0.15rem 0 0; font-size: 0.76rem; }
+
+/* ------------------------------------------------------------------ stage */
+
+.stage {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kd-s4);
+  padding: var(--kd-s5);
+  background: var(--kd-surface-2);
+}
+
+.stage__frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  border-radius: var(--kd-radius);
+  background: var(--kd-ink);
+}
+/* Taken out of flow so the canvas cannot push the layout open with its own
+   540x960 intrinsic size. Only top/left are set — pinning all four edges
+   would stretch it and fight the aspect ratio — so the max-* pair scales the
+   replaced element down while the browser preserves its proportions. */
+.stage__frame canvas {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: auto;
+  height: auto;
+  max-width: calc(100% - 2 * var(--kd-s4));
+  max-height: calc(100% - 2 * var(--kd-s4));
+  border-radius: 6px;
+  box-shadow: var(--kd-shadow-deep);
+  display: block;
+}
+
+/* -------------------------------------------------------------- transport */
+
+.transport {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--kd-s4);
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-pill);
+  background: var(--kd-surface);
+}
+
+.transport__play {
+  width: 2.4rem; height: 2.4rem;
+  flex: 0 0 auto;
+  display: grid; place-items: center;
+  border: none;
+  border-radius: var(--kd-pill);
+  background: var(--kd-text);
+  color: var(--kd-bg);
+  cursor: pointer;
+  transition: transform var(--kd-t-move) var(--kd-ease);
+}
+.transport__play:hover { transform: scale(1.06); }
+.transport__play svg { width: 16px; height: 16px; }
+.transport__play .i-pause { display: none; }
+.transport__play.is-playing .i-play { display: none; }
+.transport__play.is-playing .i-pause { display: block; }
+
+.tc {
+  font-size: 0.76rem;
+  color: var(--kd-muted);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.transport__label {
+  flex: 0 0 auto;
+  font-size: 0.76rem;
+  color: var(--kd-muted);
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scrub {
+  flex: 1 1 auto;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+}
+.scrub::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 3px;
+  background: var(--kd-line);
+}
+.scrub::-moz-range-track { height: 3px; border-radius: 3px; background: var(--kd-line); }
+.scrub::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px; height: 13px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--kd-blue);
+  border: none;
+  transition: transform var(--kd-t-fast) var(--kd-ease);
+}
+.scrub::-moz-range-thumb {
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: var(--kd-blue);
+  border: none;
+}
+.scrub:hover::-webkit-slider-thumb { transform: scale(1.25); }
+
+/* ------------------------------------------------------------ right rail */
+
+.export { width: 100%; text-align: center; position: relative; overflow: hidden; }
+.export[data-busy] { pointer-events: none; }
+.export__bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(255, 255, 255, 0.22);
+  width: 0;
+  transition: width 0.2s linear;
+}
+.export__label { position: relative; }
+.export-note { margin: -0.4rem 0 0; }
+
+.frames-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.frames-head .kd-muted { font-size: 0.78rem; }
+
+.add-frame { width: 100%; text-align: center; padding: 0.7rem 1.2rem; }
+
+.frames {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.frame-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.35rem;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-sm);
+  background: var(--kd-surface);
+  cursor: grab;
+  transition: border-color var(--kd-t-fast) var(--kd-ease),
+              background var(--kd-t-fast) var(--kd-ease);
+}
+.frame-row:hover { border-color: color-mix(in srgb, var(--kd-blue) 45%, var(--kd-line)); }
+.frame-row.is-selected { border-color: var(--kd-blue); }
+.frame-row.is-current { background: var(--kd-surface-2); }
+.frame-row.is-dragging { opacity: 0.4; cursor: grabbing; }
+.frame-row.is-drop-target { border-color: var(--kd-blue); border-style: dashed; }
+
+.frame-row__grip {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--kd-muted);
+  font-size: 0.7rem;
+  line-height: 1;
+  letter-spacing: -1px;
+  user-select: none;
+}
+.frame-row__thumb {
+  flex: 0 0 auto;
+  width: 30px; height: 53px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--kd-surface-2);
+  display: block;
+}
+.frame-row__thumb canvas { width: 100%; height: 100%; display: block; }
+
+.frame-row__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.frame-row__num {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--kd-muted);
+  font-variant-numeric: tabular-nums;
+}
+.frame-row__name {
+  display: block;
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frame-row__kill {
+  flex: 0 0 auto;
+  width: 1.6rem; height: 1.6rem;
+  display: grid; place-items: center;
+  border: none;
+  border-radius: var(--kd-pill);
+  background: transparent;
+  color: var(--kd-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  transition: color var(--kd-t-fast) var(--kd-ease), background var(--kd-t-fast) var(--kd-ease);
+}
+.frame-row__kill:hover { color: var(--kd-error); background: var(--kd-surface-2); }
+
+/* ------------------------------------------------------------ frame edit */
+
+.editor { border-top: 1px solid var(--kd-line); padding-top: var(--kd-s4); }
+.editor__name { margin: 0; font-size: 0.95rem; font-weight: 500; }
+.editor__close {
+  border: none;
+  background: transparent;
+  color: var(--kd-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+.editor__close:hover { color: var(--kd-text); }
+.editor__reset { width: 100%; text-align: center; padding: 0.6rem 1.2rem; font-size: 0.78rem; }
+
+.kd-field.slider {
+  gap: 0.3rem;
+  font-size: 0.76rem;
+  letter-spacing: var(--kd-track-label);
+  text-transform: uppercase;
+  color: var(--kd-muted);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.kd-field.slider output {
+  position: absolute;
+  right: 0;
+  top: 0;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--kd-text);
+}
+.kd-field.slider input[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 18px;
+  background: transparent;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+}
+.kd-field.slider input[type="range"]:focus { box-shadow: none; }
+.kd-field.slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px; border-radius: 3px; background: var(--kd-line);
+}
+.kd-field.slider input[type="range"]::-moz-range-track {
+  height: 3px; border-radius: 3px; background: var(--kd-line);
+}
+.kd-field.slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px; height: 12px; margin-top: -4.5px;
+  border-radius: 50%; background: var(--kd-blue); border: none;
+}
+.kd-field.slider input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%; background: var(--kd-blue); border: none;
+}
+
+/* --------------------------------------------------------- scene picker */
+
+.picker {
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius);
+  background: var(--kd-surface);
+  color: var(--kd-text);
+  padding: var(--kd-s5);
+  width: min(680px, 92vw);
+  max-height: 82vh;
+  overflow-y: auto;
+  box-shadow: var(--kd-shadow-deep);
+}
+.picker::backdrop { background: rgba(10, 11, 14, 0.55); }
+.picker__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--kd-s4);
+}
+.picker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 0.7rem;
+}
+.picker__item {
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-sm);
+  background: var(--kd-surface);
+  padding: 0.45rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  transition: border-color var(--kd-t-fast) var(--kd-ease), transform var(--kd-t-move) var(--kd-ease);
+}
+.picker__item:hover { border-color: var(--kd-blue); transform: translateY(-2px); }
+.picker__item canvas {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  border-radius: 5px;
+  display: block;
+  background: var(--kd-surface-2);
+}
+.picker__item span { font-size: 0.74rem; line-height: 1.3; }
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 1180px) {
+  .app { grid-template-columns: 250px minmax(0, 1fr) 296px; }
+}
+
+@media (max-width: 980px) {
+  body { overflow: auto; }
+  .app {
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+  .rail {
+    overflow: visible;
+    border: none;
+    border-bottom: 1px solid var(--kd-line);
+  }
+  .rail--right { order: 3; border-bottom: none; }
+  .stage { order: 2; padding: var(--kd-s4); }
+  /* Stacked, the stage has no definite height, so the canvas goes back to
+     normal flow instead of absolute positioning off the top of the page. */
+  .stage__frame {
+    display: grid;
+    place-items: center;
+    padding: var(--kd-s4);
+  }
+  .stage__frame canvas {
+    position: static;
+    transform: none;
+    max-width: 100%;
+    max-height: 62vh;
+  }
+
+  .app-bar { height: auto; padding: 0.7rem 1rem; gap: 0.5rem; }
+  .app-brand .kd-tag { display: none; }
+  .app-brand h1 { font-size: 0.95rem; }
+  .transport { flex-wrap: wrap; border-radius: var(--kd-radius); }
+  .transport__label { width: 100%; max-width: none; }
+  .frames { max-height: 340px; overflow-y: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; }
+}
+
+.picker__group {
+  grid-column: 1 / -1;
+  margin: var(--kd-s3) 0 0;
+}
+.picker__group:first-child { margin-top: 0; }
+
+/* --------------------------------------------------- audio + interaction */
+
+.drop--audio {
+  padding: var(--kd-s3) var(--kd-s4);
+  align-items: center;
+  text-align: center;
+}
+.drop--audio .drop__hint { line-height: 1.4; }
+
+.stage__frame canvas { cursor: grab; touch-action: none; }
+.stage__frame canvas.is-grabbing { cursor: grabbing; }
+
+/* -------------------------------------------------- frame adjust controls */
+
+.editor__sub { margin: var(--kd-s3) 0 0; }
+
+.placeholder-note {
+  border-left: 2px solid var(--kd-blue);
+  padding-left: 0.6rem;
+}
+
+/* A file input dressed as a chip, so "use my image" sits beside the other
+   background controls instead of looking like a form field. */
+.kd-chip--file { cursor: pointer; }

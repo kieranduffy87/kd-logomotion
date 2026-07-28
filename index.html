@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KD Logomotion — logo match cut, built from the system</title>
+<meta name="description" content="Drop in a logo and get a vertical brand film back. Twenty-eight scenes built from the KD design system, exported as MP4 in the browser.">
+<script>(function(){var t;try{t=localStorage.getItem('kd-theme')}catch(e){}document.documentElement.setAttribute('data-theme', t==='dark'?'dark':'light');})();</script>
+<link rel="stylesheet" href="fonts/instrument-sans.css">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/kd.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="icon" type="image/svg+xml" href="assets/kd-icon-dark.svg">
+<script src="vendor/mp4-muxer.min.js"></script>
+</head>
+<body class="kd-scope">
+<a class="kd-skip-link" href="#stage">Skip to the preview</a>
+
+<header class="app-bar">
+  <div class="app-brand">
+    <svg viewBox="0 0 18.62 11.73" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <polygon fill="#0339f8" points="18.62 0 12 0 6 5.86 12 11.73 18.62 11.73 12.62 5.86 18.62 0"/>
+      <polygon class="ink" points="0 0 0 11.72 6 5.86 0 0"/>
+    </svg>
+    <h1>Logomotion</h1>
+    <span class="kd-tag">Match cut</span>
+  </div>
+  <div class="app-bar__end">
+    <button class="kd-btn kd-btn--ghost kd-btn--nav" id="resetBtn" type="button">Reset reel</button>
+    <button class="kd-theme-toggle" id="themeToggle" type="button" aria-label="Switch between light and dark mode">
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="app" id="main">
+
+  <aside class="rail rail--left">
+    <section class="panel">
+      <p class="kd-label">01 — Your mark</p>
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept="image/png,image/svg+xml,image/jpeg,image/webp" hidden>
+        <span class="drop__arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        </span>
+        <span class="drop__title">Drop your logo</span>
+        <span class="drop__hint">or click to browse · PNG, SVG, JPEG, WebP</span>
+      </label>
+      <p class="kd-muted note" id="dropError" role="alert" hidden></p>
+      <p class="kd-muted note placeholder-note" id="placeholderNote" hidden>Showing the KD mark so you can see how it works. Drop yours in to replace it.</p>
+
+      <div class="logo-meta" id="logoMeta" hidden>
+        <div class="logo-meta__chip"><canvas id="logoSwatch" width="120" height="120"></canvas></div>
+        <div>
+          <p class="logo-meta__name" id="logoName">—</p>
+          <p class="kd-muted logo-meta__dims" id="logoDims">—</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="inkPanel" hidden>
+      <p class="kd-label">02 — Ink</p>
+      <div class="chips" role="group" aria-label="How the mark is coloured">
+        <button class="kd-chip" type="button" data-ink="reink">Re-ink</button>
+        <button class="kd-chip" type="button" data-ink="original">Keep colour</button>
+      </div>
+      <p class="kd-muted note" id="inkNote"></p>
+    </section>
+
+    <section class="panel" id="placePanel" hidden>
+      <p class="kd-label">03 — Placement</p>
+      <p class="kd-muted note">Applies to every frame. Drag on the preview to nudge one.</p>
+
+      <label class="kd-field slider">Size <output id="outGScale">100%</output>
+        <input type="range" id="gScale" min="30" max="200" step="1" value="100">
+      </label>
+      <label class="kd-field slider">Across <output id="outGDx">0</output>
+        <input type="range" id="gDx" min="-30" max="30" step="1" value="0">
+      </label>
+      <label class="kd-field slider">Down <output id="outGDy">0</output>
+        <input type="range" id="gDy" min="-30" max="30" step="1" value="0">
+      </label>
+      <label class="kd-field slider">Rotation <output id="outGRot">0°</output>
+        <input type="range" id="gRot" min="-45" max="45" step="1" value="0">
+      </label>
+      <button class="kd-btn kd-btn--ghost editor__reset" id="gReset" type="button">Reset placement</button>
+    </section>
+
+    <section class="panel">
+      <p class="kd-label">04 — Soundtrack</p>
+      <div class="chips" id="beds" role="group" aria-label="Soundtrack"></div>
+      <label class="drop drop--audio" id="audioDrop">
+        <input type="file" id="audioFile" accept="audio/*" hidden>
+        <span class="drop__hint">or drop your own track · MP3, WAV, M4A</span>
+      </label>
+      <p class="kd-muted note" id="bedNote"></p>
+    </section>
+
+    <section class="panel">
+      <p class="kd-label">05 — Beat</p>
+      <div class="chips" id="speeds" role="group" aria-label="Cut speed"></div>
+      <p class="kd-muted note" id="beatNote"></p>
+    </section>
+  </aside>
+
+  <section class="stage" id="stage" aria-label="Preview">
+    <div class="stage__frame">
+      <canvas id="preview" width="540" height="960" aria-label="Reel preview"></canvas>
+    </div>
+
+    <div class="transport">
+      <button class="transport__play" id="playBtn" type="button" aria-label="Play">
+        <svg class="i-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        <svg class="i-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
+      </button>
+      <span class="tc" id="tNow">0:00</span>
+      <input type="range" class="scrub" id="scrub" min="0" max="27" step="1" value="0" aria-label="Timeline">
+      <span class="tc" id="tEnd">0:05</span>
+      <span class="transport__label" id="frameName">Warm paper</span>
+    </div>
+  </section>
+
+  <aside class="rail rail--right">
+    <button class="kd-btn export" id="exportBtn" type="button">Download video</button>
+    <p class="kd-muted note export-note" id="exportNote"></p>
+
+    <section class="panel panel--flush">
+      <div class="frames-head">
+        <p class="kd-label">Frames</p>
+        <span class="kd-muted" id="frameCount">28 frames</span>
+      </div>
+      <button class="kd-btn kd-btn--ghost add-frame" id="addBtn" type="button">+ Add frame</button>
+      <ol class="frames" id="frames" aria-label="Frame order"></ol>
+    </section>
+
+    <section class="panel editor" id="editor" hidden>
+      <div class="frames-head">
+        <p class="kd-label">Frame <span id="editorNum">1</span></p>
+        <button class="editor__close" id="editorClose" type="button" aria-label="Close frame settings">×</button>
+      </div>
+      <p class="editor__name" id="editorName">Warm paper</p>
+
+      <div class="chips" role="group" aria-label="Tone">
+        <button class="kd-chip" type="button" data-tone="light">Light</button>
+        <button class="kd-chip" type="button" data-tone="dark">Inverted</button>
+      </div>
+
+      <div class="chips">
+        <button class="kd-chip" type="button" id="swapBg">Change background</button>
+        <label class="kd-chip kd-chip--file">Use my image
+          <input type="file" id="customBg" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+        </label>
+      </div>
+
+      <p class="kd-label editor__sub">Adjust</p>
+      <div class="chips" role="group" aria-label="Image adjustments">
+        <button class="kd-chip" type="button" data-fx="invert">Invert</button>
+        <button class="kd-chip" type="button" data-fx="grayscale">Mono</button>
+      </div>
+
+      <label class="kd-field slider">Brightness <output id="outBright">100%</output>
+        <input type="range" id="ctlBright" min="20" max="220" step="1" value="100">
+      </label>
+      <label class="kd-field slider">Contrast <output id="outContrast">100%</output>
+        <input type="range" id="ctlContrast" min="20" max="260" step="1" value="100">
+      </label>
+      <button class="kd-btn kd-btn--ghost editor__reset" id="fxAll" type="button">Apply adjust to all frames</button>
+
+      <p class="kd-label editor__sub">Placement</p>
+
+      <label class="kd-field slider">Scale <output id="outScale">100%</output>
+        <input type="range" id="ctlScale" min="30" max="220" step="1" value="100">
+      </label>
+      <label class="kd-field slider">Across <output id="outDx">0</output>
+        <input type="range" id="ctlDx" min="-40" max="40" step="1" value="0">
+      </label>
+      <label class="kd-field slider">Down <output id="outDy">0</output>
+        <input type="range" id="ctlDy" min="-40" max="40" step="1" value="0">
+      </label>
+      <label class="kd-field slider">Rotation <output id="outRot">0°</output>
+        <input type="range" id="ctlRot" min="-45" max="45" step="1" value="0">
+      </label>
+
+      <button class="kd-btn kd-btn--ghost editor__reset" id="ctlReset" type="button">Reset placement</button>
+    </section>
+  </aside>
+</main>
+
+<dialog class="picker" id="picker" aria-label="Choose a scene">
+  <div class="picker__head">
+    <p class="kd-label">Add a frame</p>
+    <button class="editor__close" id="pickerClose" type="button" aria-label="Close">×</button>
+  </div>
+  <div class="picker__grid" id="pickerGrid"></div>
+</dialog>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,115 @@
+/* ============================================================
+   KD DESIGN SYSTEM — TOKENS
+   v1.0 · Extracted from kieranduffy.ie portfolio
+   Single source of truth. Import before kd.css.
+
+   Themes: light is default on :root.
+   Dark mode activates via [data-theme="dark"].
+   ============================================================ */
+
+:root {
+  /* ---------- brand core (theme-invariant) ---------- */
+  --kd-blue:        #0339f8;   /* KD Electric Blue — the one brand colour */
+  --kd-blue-deep:   #01145a;   /* gradient anchor, placeholder art only */
+  --kd-blue-night:  #020e3e;   /* footer gradient tail */
+  --kd-ink:         #0a0b0e;   /* Scrim Ink — media scrims + footer, fixed in both themes */
+  --kd-paper-white: #f4f4f6;   /* text on scrim ink */
+
+  /* ---------- functional ---------- */
+  --kd-error:       #c62f2f;
+
+  /* ---------- expressive accents (playground / illustration only) ---------- */
+  --kd-coral:       #ff7a59;
+  --kd-teal:        #21d4b4;
+
+  /* ---------- theme: light ("warm paper") ---------- */
+  --kd-bg:          #f6f5f1;
+  --kd-text:        #0e0f12;
+  --kd-muted:       #585e69;
+  --kd-line:        rgba(14, 15, 18, 0.14);
+  --kd-surface:     #ffffff;
+  --kd-surface-2:   #eceae4;
+  --kd-accent:      var(--kd-blue);
+  --kd-accent-text: var(--kd-blue);
+  --kd-pill-bg:     rgba(255, 255, 255, 0.72);
+  --kd-pill-border: rgba(14, 15, 18, 0.10);
+  --kd-logo-filter: brightness(0.45);
+
+  /* ---------- typography ---------- */
+  --kd-font: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+
+  /* type scale (fluid) */
+  --kd-fs-hero:     clamp(2.8rem, 8vw, 6.8rem);    /* page titles */
+  --kd-fs-display:  clamp(2.6rem, 6.5vw, 5.5rem);  /* statements */
+  --kd-fs-title:    clamp(2.2rem, 5vw, 4rem);      /* section heads */
+  --kd-fs-heading:  clamp(2rem, 4.4vw, 3.6rem);    /* prose blocks */
+  --kd-fs-subhead:  clamp(1.7rem, 3.2vw, 2.5rem);  /* case sections */
+  --kd-fs-lede:     clamp(1.35rem, 2.6vw, 1.9rem); /* editorial intros */
+  --kd-fs-large:    clamp(1.05rem, 1.6vw, 1.35rem);/* supporting copy */
+  --kd-fs-body:     1.0625rem;                     /* 17px base */
+  --kd-fs-small:    0.9rem;
+  --kd-fs-label:    0.72rem;                       /* kicker / label */
+  --kd-fs-tag:      0.62rem;                       /* pill tags */
+
+  /* type detail */
+  --kd-track-display: -0.02em;
+  --kd-track-label:   0.14em;
+  --kd-track-tag:     0.12em;
+  --kd-lh-display:    1.05;
+  --kd-lh-body:       1.65;
+
+  /* ---------- spacing ---------- */
+  --kd-pad:         clamp(1.25rem, 4vw, 4rem);     /* page gutter */
+  --kd-section:     clamp(4rem, 9vw, 8rem);        /* section rhythm */
+  --kd-section-sm:  clamp(2.5rem, 5vw, 4rem);
+  --kd-gap:         1.5rem;                        /* card grids */
+  --kd-gap-lg:      2.5rem;
+
+  /* spacing steps (fixed) */
+  --kd-s1: 0.25rem;  --kd-s2: 0.5rem;   --kd-s3: 0.8rem;
+  --kd-s4: 1.2rem;   --kd-s5: 1.6rem;   --kd-s6: 2.2rem;
+  --kd-s7: 3rem;     --kd-s8: 4rem;
+
+  /* ---------- shape ---------- */
+  --kd-radius:      18px;      /* cards, media, panels */
+  --kd-radius-sm:   14px;      /* nested elements */
+  --kd-radius-xs:   10px;      /* inputs */
+  --kd-pill:        100px;     /* buttons, chips, nav, tags */
+
+  /* ---------- elevation ---------- */
+  --kd-shadow-nav:   0 8px 32px rgba(10, 11, 14, 0.12);
+  --kd-shadow-hover: 0 16px 48px rgba(10, 11, 14, 0.10);
+  --kd-shadow-deep:  0 24px 80px rgba(10, 11, 14, 0.18);
+
+  /* ---------- motion ---------- */
+  --kd-ease:        cubic-bezier(0.22, 0.7, 0.2, 1);  /* the house curve */
+  --kd-t-fast:      0.25s;   /* colour / border shifts */
+  --kd-t-move:      0.35s;   /* transforms, lifts */
+  --kd-t-theme:     0.4s;    /* theme cross-fade */
+  --kd-t-reveal:    0.9s;    /* scroll reveals, rises */
+  --kd-t-media:     0.8s;    /* image zooms */
+
+  /* ---------- scrims ---------- */
+  --kd-scrim-hero:
+    radial-gradient(ellipse 75% 55% at 50% 52%, rgba(10, 11, 14, 0.42), transparent 78%),
+    linear-gradient(200deg, rgba(10, 11, 14, 0.18) 25%, rgba(10, 11, 14, 0.88) 86%),
+    linear-gradient(90deg, rgba(10, 11, 14, 0.4), transparent 55%);
+  --kd-grad-footer: linear-gradient(180deg, #0a0b0e, #05060a 55%, #020e3e);
+  --kd-grad-placeholder:
+    radial-gradient(ellipse 90% 90% at 15% 0%, rgba(3, 57, 248, 0.45), transparent 55%),
+    radial-gradient(ellipse 80% 90% at 100% 100%, rgba(1, 20, 90, 0.85), transparent 70%),
+    linear-gradient(160deg, #0a0f22, #05070f);
+}
+
+/* ---------- theme: dark ---------- */
+[data-theme="dark"] {
+  --kd-bg:          #08090b;
+  --kd-text:        #eceef2;
+  --kd-muted:       #8f939d;
+  --kd-line:        rgba(236, 238, 242, 0.13);
+  --kd-surface:     #101216;
+  --kd-surface-2:   #16181d;
+  --kd-pill-bg:     rgba(14, 16, 20, 0.70);
+  --kd-pill-border: rgba(236, 238, 242, 0.12);
+  --kd-logo-filter: none;
+}
