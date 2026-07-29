@@ -156,18 +156,22 @@ The speed chips choose how finely the beat is divided — 1/1, 1/2, 1/4 or 1/8.
 Four rungs rather than three because with three, Slow and Beat collapsed onto
 the same subdivision at most tempos.
 
-Four beds are synthesised in Web Audio: Pulse (124), Snap (96), Strobe (140)
-and Hum (76), spread across the tempo range so the speed chips have somewhere
-to go. They run through a mix bus rather than straight at the destination — a
+Five licensed loops ship as presets — Lean (91), Roll (94), Knock (97), Step
+(115) and Rush (139), ordered by tempo, which is also the order the reel steps
+up in speed. Their tempo and downbeat are measured once and stored in `TRACKS`,
+so picking one is instant rather than re-analysing on every selection. See
+`audio/README.md` for provenance and licensing.
+
+Four beds are also synthesised in Web Audio: Pulse (124), Snap (96), Strobe
+(140) and Hum (76), spread across the same range. They run through a mix bus rather than straight at the destination — a
 saturator for glue, a compressor behind it, and a ducking gain the bass sits
 behind so every kick pushes it out of the way. That sidechain pump, plus swung
 off-beats and layered transients (a kick has a body *and* a beater; a clap is
 three noise bursts a few milliseconds apart), is most of what separates
 something that sounds produced from something that sounds like a test tone.
 
-Nothing third-party is bundled. Everything is generated in the browser, which
-is also why there is nothing to licence. Drop in your own file and it is
-analysed the same way.
+Drop in your own file and it is analysed the same way — tempo detected,
+downbeat found, cuts hung off the result.
 
 **Playback** (`js/player.js`) — with no soundtrack, 180ms per cut and the Slow /
 Beat / Fast / Strobe chips set the pace. With one, the track decides. Space

@@ -5,6 +5,7 @@ import { SCENES, defaultFrames, makeFrame, makePlateFrame, frameLabel, PALETTE }
 import { PLATES, loadPlatesFor, onPlateLoad } from "./plates.js";
 import {
   BEDS, BED_BY_ID, renderBed, decodeFile, detectBpm,
+  TRACKS, TRACK_BY_ID, loadTrack,
   fitBuffer, audioContext, bedSeconds, beatPhase, beatTimes,
   holdForBpm, SUBDIVISIONS,
 } from "./audio.js";
@@ -231,14 +232,55 @@ $("gReset").addEventListener("click", () => {
 /* ----------------------------------------------------------- soundtrack */
 
 const bedWrap = $("beds");
+const trackWrap = $("tracks");
+
+TRACKS.forEach((t) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "kd-chip";
+  b.textContent = t.name;
+  b.dataset.track = t.id;
+  b.title = `${t.bpm} BPM`;
+  b.addEventListener("click", async () => {
+    const turningOff = trackId === t.id && !userTrack;
+    if (turningOff) { trackId = null; trackBuf = null; }
+    else {
+      $("bedNote").textContent = `Loading ${t.name}…`;
+      try {
+        trackBuf = await loadTrack(t.id);
+        trackId = t.id;
+      } catch (err) {
+        $("bedNote").textContent = err.message;
+        return;
+      }
+    }
+    bedId = null;
+    userTrack = null;
+    syncBedChips();
+    await rebuildAudio();
+  });
+  trackWrap.appendChild(b);
+});
 let bedId = null;
+let trackId = null;        /* one of the licensed loops */
+let trackBuf = null;
 let userTrack = null;      /* decoded upload, before fitting */
 let userBpm = null;
+let userPhase = 0;
 
 function currentBpm() {
   if (userTrack) return userBpm || 120;
+  if (trackId) return TRACK_BY_ID[trackId].bpm;
   const bed = BED_BY_ID[bedId];
   return bed ? bed.bpm : null;
+}
+
+/* Where the first downbeat lands, in seconds. Beds are synthesised from zero
+   so theirs is zero; a real recording almost always has a pickup before it. */
+function currentPhase() {
+  if (userTrack) return userPhase;
+  if (trackId) return TRACK_BY_ID[trackId].phase;
+  return 0;
 }
 
 /* Beat detection drives the cut.
@@ -255,7 +297,7 @@ function rebuildCuts() {
   if (!bpm || !model.frames.length) { model.cuts = null; return; }
 
   const step = holdForBpm(bpm, subdivision);
-  const phase = userTrack ? beatPhase(userTrack, bpm) * 1000 : 0;
+  const phase = currentPhase() * 1000;
   model.cuts = model.frames.map((_, i) => Math.round(phase + i * step));
   player.setHold(Math.round(step));
 }
@@ -266,6 +308,7 @@ async function rebuildAudio() {
   const seconds = estimate(model.frames.length, player.holdMs, model.cuts).seconds;
 
   if (userTrack) model.audio = fitBuffer(userTrack, seconds);
+  else if (trackBuf) model.audio = fitBuffer(trackBuf, seconds);
   else if (bedId) model.audio = await renderBed(bedId, BED_BY_ID[bedId].bpm, seconds);
   else model.audio = null;
 
@@ -275,13 +318,21 @@ async function rebuildAudio() {
 }
 
 function syncBedChips() {
-  bedWrap.querySelectorAll(".kd-chip").forEach((b) => {
-    b.classList.toggle("is-active", b.dataset.bed === bedId && !userTrack);
+  bedWrap.querySelectorAll("[data-bed]").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.bed === bedId && !userTrack && !trackId);
+  });
+  trackWrap.querySelectorAll("[data-track]").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.track === trackId && !userTrack);
   });
 }
 
 function syncBedNote() {
   const bpm = currentBpm();
+  if (trackId && !userTrack) {
+    const t = TRACK_BY_ID[trackId];
+    $("bedNote").textContent = `${t.name} · ${t.bpm} BPM · cuts land on its beat.`;
+    return;
+  }
   if (userTrack) {
     $("bedNote").textContent = `${userTrack.name} · ${userBpm ? `${userBpm} BPM detected` : "tempo unknown"}`;
   } else if (bedId) {
@@ -300,8 +351,10 @@ BEDS.forEach((bed) => {
   b.textContent = bed.name;
   b.dataset.bed = bed.id;
   b.addEventListener("click", async () => {
-    bedId = bedId === bed.id && !userTrack ? null : bed.id;
+    bedId = bedId === bed.id && !userTrack && !trackId ? null : bed.id;
     userTrack = null;
+    trackId = null;
+    trackBuf = null;
     syncBedChips();
     await rebuildAudio();
   });
@@ -336,7 +389,10 @@ async function acceptAudio(file) {
     userTrack = buf;
     userTrack.name = file.name.replace(/\.[^.]+$/, "");
     userBpm = detectBpm(buf);
+    userPhase = userBpm ? beatPhase(buf, userBpm) : 0;
     bedId = null;
+    trackId = null;
+    trackBuf = null;
     syncBedChips();
     await rebuildAudio();
   } catch (err) {

@@ -303,6 +303,36 @@ export const BEDS = [
   },
 ];
 
+/* ------------------------------------------------------------- the tracks
+
+   Licensed loops supplied by KD. Tempo and downbeat are measured once, here,
+   rather than analysed on every selection: detection takes a moment and the
+   answer never changes, so storing it makes picking a preset instant.
+
+   Ordered by tempo, which is also the order the speed of the reel steps up. */
+export const TRACKS = [
+  { id: "lean",  name: "Lean",  file: "audio/track-4.mp3", bpm: 91,  phase: 0.255, seconds: 7.03 },
+  { id: "roll",  name: "Roll",  file: "audio/track-1.mp3", bpm: 94,  phase: 0.255, seconds: 8.20 },
+  { id: "knock", name: "Knock", file: "audio/track-2.mp3", bpm: 97,  phase: 0.331, seconds: 7.21 },
+  { id: "step",  name: "Step",  file: "audio/track-3.mp3", bpm: 115, phase: 0.032, seconds: 5.69 },
+  { id: "rush",  name: "Rush",  file: "audio/track-5.mp3", bpm: 139, phase: 0.281, seconds: 7.99 },
+];
+
+export const TRACK_BY_ID = Object.fromEntries(TRACKS.map((t) => [t.id, t]));
+
+const trackCache = new Map();
+
+export async function loadTrack(id) {
+  if (trackCache.has(id)) return trackCache.get(id);
+  const meta = TRACK_BY_ID[id];
+  if (!meta) return null;
+  const res = await fetch(meta.file);
+  if (!res.ok) throw new Error(`${meta.name} could not be loaded.`);
+  const buf = await audioContext().decodeAudioData(await res.arrayBuffer());
+  trackCache.set(id, buf);
+  return buf;
+}
+
 export const BED_BY_ID = Object.fromEntries(BEDS.map((b) => [b.id, b]));
 
 /* Render a bed to the length the reel needs, at the reel's tempo. */
