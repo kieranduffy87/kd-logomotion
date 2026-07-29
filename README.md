@@ -1,9 +1,8 @@
 # KD Logomotion
 
 Drop in a logo, get a vertical brand film back. The mark is locked dead centre
-and never moves while the worlds cut past behind it. Load a soundtrack and it
-becomes the reel's clock. Exported as an MP4, with sound, without leaving the
-browser.
+and never moves while the worlds cut past behind it, on the beat of whatever
+you give it. Exported as an MP4, with sound, without leaving the browser.
 
 **The centre lock is the whole idea.** The mark is stamped into the same box on
 every single frame — same size, no rotation, no perspective, no drift. Holding
