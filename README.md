@@ -143,23 +143,31 @@ snaps to a cut, because there is no meaningful position between two of them.
 When the reel is locked to a track the ticks are unevenly spaced, and that
 spacing *is* the music.
 
-**Sound** (`js/audio.js`) — four beds (Pulse, Snap, Strobe, Hum) synthesised in
-Web Audio at whatever tempo the reel is cutting at, so the cut lands on the
-beat with no drift and nothing to licence. Or drop in your own track and the
-tempo detector — onset flux plus autocorrelation over the envelope — finds its
-BPM and snaps the cut length to it.
+**Sound** (`js/audio.js`) — **the track is the clock.** Load a soundtrack and
+the reel becomes exactly as long as it, with the frames dividing that length
+evenly. Adding a frame cuts faster, removing one cuts slower, and the picture
+always lands with the last bar. The speed control goes read-only while a track
+is loaded, because the track owns the timing.
 
-Knowing the tempo is only half of it. A grid at the right BPM but the wrong
-phase puts every cut exactly *off* the beat, so the onset envelope is also
-correlated against a pulse train at each candidate offset and the best-scoring
-phase wins (`beatPhase`). The cuts then hang off that grid, which is what makes
-the picture change *with* the music rather than merely at the same rate. The
-exporter schedules from those cut times, so an uneven grid survives encoding. Beds are peak-limited to 0.89 because a
-layered kick and sub clip on the way into the AAC encoder.
+This is the model Logomotion uses, and it is worth being clear about why it
+works, because it is not what you would guess. Its reel is 28 cuts across a
+5.43s loop — 194ms each, which at that track's tempo is 2.81 cuts per beat. The
+cuts are not on a beat grid at all. What sells the sync is that the loop is
+short and rhythmic and the reel ends precisely with the music. Chasing exact
+beat alignment turned out to be solving a problem the format does not have.
 
-**Playback** (`js/player.js`) — 180ms per cut by default, so 24 frames run in
-about four and a half seconds. Slow / Beat / Fast / Strobe change the beat; picking a bed
-snaps it to a 1/1, 1/2 or 1/4 note. Space plays, arrow keys step.
+Four beds are synthesised in Web Audio (Pulse, Snap, Strobe, Hum), each
+rendered to a whole number of bars nearest five and a half seconds — whole bars
+because the bed is the clock and it loops, and a part-bar loop audibly stumbles
+every time it wraps. They carry no licensing risk, which a bundled commercial
+track would.
+
+You can also drop in your own file, and it becomes the clock in exactly the
+same way. Nothing is shipped that has not been generated here.
+
+**Playback** (`js/player.js`) — with no soundtrack, 180ms per cut and the Slow /
+Beat / Fast / Strobe chips set the pace. With one, the track decides. Space
+plays, arrow keys step, and the timeline scrubs to the nearest cut.
 
 **Export** (`js/export.js`) — WebCodecs `VideoEncoder` at 1080×1920, 30fps,
 H.264, plus an AAC track when a soundtrack is set, muxed to MP4 with

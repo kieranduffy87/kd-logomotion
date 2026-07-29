@@ -319,6 +319,17 @@ export async function decodeFile(file) {
 
 /* --------------------------------------------------------------- helpers */
 
+/* A bed's natural length: whole bars, landing as near five and a half seconds
+   as the tempo allows. Whole bars matter because the bed is the reel's clock
+   and it loops — a part-bar loop audibly stumbles every time it wraps. */
+export const TARGET_SECONDS = 5.4;
+
+export function bedSeconds(bpm) {
+  const bar = (60 / bpm) * 4;
+  const bars = Math.max(2, Math.round(TARGET_SECONDS / bar));
+  return bars * bar;
+}
+
 /* Cut length for a tempo. Subdivision 1 cuts on the beat, 2 on eighths, 4 on
    sixteenths — which is what makes a reel feel fast without changing the song. */
 export function holdForBpm(bpm, subdivision) {

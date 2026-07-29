@@ -5,7 +5,7 @@ import { SCENES, defaultFrames, makeFrame, makePlateFrame, frameLabel, PALETTE }
 import { PLATES, loadPlatesFor, onPlateLoad } from "./plates.js";
 import {
   BEDS, BED_BY_ID, renderBed, decodeFile, detectBpm,
-  holdForBpm, SUBDIVISIONS, fitBuffer, audioContext, beatPhase, beatTimes,
+  fitBuffer, audioContext, bedSeconds,
 } from "./audio.js";
 import { renderThumb, renderFrame, FRAME_W, FRAME_H, FX_DEFAULT, fxString } from "./compositor.js";
 import { Player, SPEEDS, formatTime } from "./player.js";
@@ -240,37 +240,36 @@ function currentBpm() {
   return bed ? bed.bpm : null;
 }
 
-/* Cut times, taken from the music rather than a metronome.
+/* The track is the clock.
 
-   Knowing the tempo is only half of it: a grid at the right BPM but the wrong
-   phase puts every cut exactly off the beat. So an uploaded track is analysed
-   for where its downbeat actually falls and the cuts hang off that. The beds
-   are synthesised from zero, so their phase is already known. */
+   Logomotion's reel is exactly as long as its backing loop, and the frames
+   divide that length evenly — twenty-eight cuts across a 5.4s track is 194ms
+   each, which at its tempo is 2.81 cuts per beat. So the cuts are not sitting
+   on a beat grid at all. What sells the sync is that the loop is short and
+   rhythmic and the picture ends precisely with the music.
+
+   Replicated here: load a track and it takes over the timing. Adding frames
+   cuts faster, removing them cuts slower, and the reel always lands with the
+   last bar. */
 function rebuildCuts() {
-  const bpm = currentBpm();
-  if (!bpm) { model.cuts = null; return; }
-
-  const sub = SUBDIVISIONS.reduce((best, cand) => {
-    const d = Math.abs(holdForBpm(bpm, cand.id) - player.holdMs);
-    return !best || d < best.d ? { id: cand.id, d } : best;
-  }, null);
-
-  const phase = userTrack ? beatPhase(userTrack, bpm) : 0;
-  const step = holdForBpm(bpm, sub ? sub.id : 1);
-  const span = ((model.frames.length + 1) * step) / 1000;
-  const times = beatTimes(bpm, sub ? sub.id : 1, phase, span);
-  model.cuts = model.frames.map((_, i) => Math.round((times[i] != null ? times[i] : i * step / 1000) * 1000));
+  if (!model.audio || !model.frames.length) { model.cuts = null; return; }
+  const total = model.audio.duration * 1000;
+  const step = total / model.frames.length;
+  model.cuts = model.frames.map((_, i) => Math.round(i * step));
+  player.setHold(Math.round(step));
 }
 
 async function rebuildAudio() {
+  if (userTrack) model.audio = userTrack;
+  else if (bedId) {
+    const bed = BED_BY_ID[bedId];
+    model.audio = await renderBed(bedId, bed.bpm, bedSeconds(bed.bpm));
+  } else {
+    model.audio = null;
+  }
   rebuildCuts();
-  /* Match the exported length, not the nominal one: the frame schedule rounds
-     the reel to whole frames, and the bed has to end where the picture does. */
-  const seconds = estimate(model.frames.length, player.holdMs, model.cuts).seconds;
-  if (userTrack) model.audio = fitBuffer(userTrack, seconds);
-  else if (bedId) model.audio = await renderBed(bedId, BED_BY_ID[bedId].bpm, seconds);
-  else model.audio = null;
   syncBedNote();
+  syncSpeedChips();
   syncTransport();
 }
 
@@ -286,9 +285,9 @@ function syncBedNote() {
     $("bedNote").textContent = `${userTrack.name} · ${userBpm ? `${userBpm} BPM detected` : "tempo unknown"}`;
   } else if (bedId) {
     const bed = BED_BY_ID[bedId];
-    $("bedNote").textContent = `${bed.note} ${bed.bpm} BPM.`;
+    $("bedNote").textContent = `${bed.note} ${bed.bpm} BPM · sets the reel length.`;
   } else {
-    $("bedNote").textContent = "Silent. Pick a bed to lock the cut to a beat.";
+    $("bedNote").textContent = "Silent. Pick a bed and it becomes the reel's clock.";
   }
   if (bpm) $("beatNote").dataset.bpm = String(bpm);
 }
@@ -302,29 +301,11 @@ BEDS.forEach((bed) => {
   b.addEventListener("click", async () => {
     bedId = bedId === bed.id && !userTrack ? null : bed.id;
     userTrack = null;
-    if (!bedId) model.cuts = null;
     syncBedChips();
-    if (bedId) snapToBeat();
     await rebuildAudio();
   });
   bedWrap.appendChild(b);
 });
-
-/* Locking the cut to the tempo is the whole point of picking a bed: choose the
-   subdivision whose cut length is nearest whatever speed is already set. */
-function snapToBeat() {
-  const bpm = currentBpm();
-  if (!bpm) return;
-  let best = null;
-  SUBDIVISIONS.forEach((s) => {
-    const ms = holdForBpm(bpm, s.id);
-    const delta = Math.abs(ms - player.holdMs);
-    if (!best || delta < best.delta) best = { ms, delta };
-  });
-  if (best) player.setHold(Math.round(best.ms));
-  syncSpeedChips();
-  syncTransport();
-}
 
 const audioInput = $("audioFile");
 $("audioDrop").addEventListener("click", (e) => {
@@ -356,7 +337,6 @@ async function acceptAudio(file) {
     userBpm = detectBpm(buf);
     bedId = null;
     syncBedChips();
-    snapToBeat();
     await rebuildAudio();
   } catch (err) {
     userTrack = null;
@@ -373,32 +353,29 @@ SPEEDS.forEach((s) => {
   b.className = "kd-chip";
   b.textContent = s.label;
   b.dataset.ms = String(s.ms);
-  b.addEventListener("click", async () => {
+  b.addEventListener("click", () => {
+    if (model.audio) return;      /* the track owns the timing */
     player.setHold(s.ms);
     syncSpeedChips();
     syncTransport();
-    /* Reel length changed, so the bed has to be re-rendered to match it. */
-    if (model.audio) await rebuildAudio();
   });
   speedWrap.appendChild(b);
 });
 
 function syncSpeedChips() {
+  const locked = !!model.audio;
   speedWrap.querySelectorAll(".kd-chip").forEach((b) => {
-    b.classList.toggle("is-active", Number(b.dataset.ms) === player.holdMs);
+    b.classList.toggle("is-active", !locked && Number(b.dataset.ms) === player.holdMs);
+    b.disabled = locked;
   });
-  const bpm = currentBpm();
-  let beat = "";
-  if (bpm) {
-    const sub = SUBDIVISIONS.reduce((best, s) => {
-      const d = Math.abs(holdForBpm(bpm, s.id) - player.holdMs);
-      return !best || d < best.d ? { s, d } : best;
-    }, null);
-    /* Only claim it is locked when the cut really is on the grid. */
-    if (sub && sub.d < 12) beat = ` · ${sub.s.label} note at ${bpm} BPM`;
+  if (locked) {
+    $("beatNote").textContent =
+      `Locked to the track · ${player.holdMs}ms per cut · ${formatTime(player.duration)}. ` +
+      `Add or remove frames to cut faster or slower.`;
+    return;
   }
   $("beatNote").textContent =
-    `${player.holdMs}ms per cut · ${formatTime(player.duration)} total${beat}`;
+    `${player.holdMs}ms per cut · ${formatTime(player.duration)} total · silent`;
 }
 
 /* ------------------------------------------------------------ transport */
@@ -972,9 +949,13 @@ window.addEventListener("keydown", (e) => {
 /* ------------------------------------------------------------------ boot */
 
 function refreshAll() {
+  /* The frame count divides the track, so adding or removing a frame changes
+     how fast the reel cuts — re-derive the grid before anything redraws. */
+  rebuildCuts();
   player.refresh();
   renderFrames();
   syncTransport();
+  syncSpeedChips();
 }
 
 /* Plates arrive one at a time; each one repaints its own thumbnails and the
