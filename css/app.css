@@ -604,3 +604,23 @@ body {
 .track:focus-visible { outline: 3px solid var(--kd-blue); outline-offset: 4px; border-radius: 4px; }
 
 .sub-label { margin: 0.15rem 0 -0.1rem; font-size: 0.72rem; opacity: 0.75; }
+
+.kd-field.inkpick {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.76rem;
+  letter-spacing: var(--kd-track-label);
+  text-transform: uppercase;
+  color: var(--kd-muted);
+}
+.kd-field.inkpick input[type="color"] {
+  width: 2.4rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-xs);
+  background: none;
+  cursor: pointer;
+}

@@ -124,6 +124,12 @@ flips while the artwork stays exactly as drawn. Inverting also flips the
 frame's effective tone, because otherwise an inverted dark plate keeps its
 white mark and the mark disappears.
 
+**Mark colour and treatment** — per frame, the mark can take the scene's
+automatic ink or be forced to ink, paper, brand blue, the logo's own dominant
+colour, or any custom hex. *Outline* strokes the traced paths instead of
+stamping the fill, with its own weight control — the same geometry the vector
+scene uses, reused.
+
 **Placement** — the left rail's controls apply to every frame at once, which is
 what you want nine times out of ten. Scale multiplies and offsets add, so a
 frame's own adjustments ride on top rather than being overwritten. For a single
@@ -150,6 +156,24 @@ phase puts every cut exactly *off* the beat, so the onset envelope is also
 correlated against a pulse train at each candidate offset and the best-scoring
 phase wins (`beatPhase`). The cuts hang off that grid, and the exporter
 schedules from those same cut times so the alignment survives encoding.
+
+**The pacing follows the music** (`beatMap`). A fixed grid cuts at one rate for
+the whole reel, which is not what a good edit does: where the track is busy the
+picture should cut hard, and where it thins out it should be allowed to sit. So
+the onset envelope is measured and the *subdivision* is chosen per cut from how
+much is going on right there — sixteenths through a dense passage, whole beats
+through a sparse one. Cuts still land on the grid; only the spacing varies,
+which is why the timeline's ticks come out uneven.
+
+The energy is ranked against the track's own distribution rather than an
+absolute threshold. That detail is the whole thing: a loud track scores near
+the ceiling everywhere, so absolute thresholds return a perfectly even map —
+exactly what this exists to avoid. Ranking guarantees the busy passages cut
+harder than the sparse ones whatever the material's dynamic range. Turn it off
+with *Follow the music* and the reel reverts to one steady subdivision.
+
+This works on anything, because it is all derived from the buffer — the
+presets and a track you drop in are analysed by the same code.
 
 The speed chips choose how finely the beat is divided — 1/1, 1/2, 1/4 or 1/8.
 Four rungs rather than three because with three, Slow and Beat collapsed onto

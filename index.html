@@ -102,6 +102,9 @@
     <section class="panel">
       <p class="kd-label">05 — Beat</p>
       <div class="chips" id="speeds" role="group" aria-label="Cut speed"></div>
+      <div class="chips" role="group" aria-label="Cut pacing">
+        <button class="kd-chip is-active" type="button" id="adaptiveChip">Follow the music</button>
+      </div>
       <p class="kd-muted note" id="beatNote"></p>
     </section>
   </aside>
@@ -159,6 +162,19 @@
           <input type="file" id="customBg" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
         </label>
       </div>
+
+      <p class="kd-label editor__sub">Mark</p>
+      <div class="chips" id="frameInk" role="group" aria-label="Mark colour"></div>
+      <div class="chips" role="group" aria-label="Mark treatment">
+        <button class="kd-chip" type="button" data-treat="auto">Solid</button>
+        <button class="kd-chip" type="button" data-treat="outline">Outline</button>
+      </div>
+      <label class="kd-field slider" id="strokeField" hidden>Stroke <output id="outStroke">0.6%</output>
+        <input type="range" id="ctlStroke" min="2" max="24" step="1" value="6">
+      </label>
+      <label class="kd-field inkpick">Custom colour
+        <input type="color" id="ctlInkColour" value="#0339f8">
+      </label>
 
       <p class="kd-label editor__sub">Adjust</p>
       <div class="chips" role="group" aria-label="Image adjustments">

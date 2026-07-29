@@ -480,6 +480,90 @@ export function beatTimes(bpm, subdivision, offset, seconds) {
   return times.length ? times : [0];
 }
 
+/* ------------------------------------------------------- the adaptive map
+
+   A fixed grid cuts at one rate for the whole reel, which is not what a good
+   edit does. Where the music is busy the picture should cut hard; where it
+   thins out it should be allowed to sit. So the onset envelope is measured and
+   the *subdivision* is chosen per cut from how much is going on right there —
+   sixteenths through a dense passage, whole beats through a sparse one.
+
+   Cuts still land on the beat grid; only the spacing between them varies. */
+
+export function onsetEnvelope(buffer) {
+  const sr = buffer.sampleRate;
+  const mono = buffer.getChannelData(0);
+  const hop = 512;
+  const frames = Math.floor(mono.length / hop);
+  const flux = new Float32Array(frames);
+
+  let prev = 0;
+  for (let f = 0; f < frames; f++) {
+    let sum = 0;
+    const start = f * hop;
+    for (let i = 0; i < hop; i++) sum += Math.abs(mono[start + i] || 0);
+    const e = sum / hop;
+    flux[f] = Math.max(0, e - prev);
+    prev = e;
+  }
+  return { flux, fps: sr / hop };
+}
+
+/* Energy in the window that follows a moment, normalised against the loudest
+   window in the track so the scale is comparable across material. */
+function windowEnergy(env, at, span) {
+  const from = Math.max(0, Math.round(at * env.fps));
+  const to = Math.min(env.flux.length, Math.round((at + span) * env.fps));
+  let sum = 0;
+  for (let i = from; i < to; i++) sum += env.flux[i];
+  return sum / Math.max(1, to - from);
+}
+
+/* `bias` shifts the whole map faster or slower, which is what the speed chips
+   drive: at 1 the thresholds sit as tuned, above 1 everything cuts harder. */
+export function beatMap(buffer, bpm, phase, count, bias = 1) {
+  const env = onsetEnvelope(buffer);
+  const beat = 60 / bpm;
+  const probe = beat / 2;
+
+  /* Energy sampled right across the track, then ranked against itself.
+
+     Absolute thresholds do not work here: a track that is loud throughout
+     scores near the ceiling everywhere and the map comes back perfectly even,
+     which is the thing it exists to avoid. Comparing each moment to the
+     track's own distribution guarantees the busy passages cut harder than the
+     sparse ones whatever the material's dynamic range. */
+  const samples = [];
+  for (let t = 0; t < buffer.duration; t += probe) {
+    samples.push({ t, e: windowEnergy(env, t, beat) });
+  }
+  if (!samples.length) {
+    return Array.from({ length: count }, (_, i) => phase + i * beat / 2);
+  }
+
+  const sorted = samples.map((s) => s.e).sort((a, b) => a - b);
+  const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+  /* Bias slides the cut points down the distribution, so a faster chip pushes
+     more of the track into the harder-cutting bands. */
+  const hi = at(Math.max(0.05, Math.min(0.95, 0.70 / bias)));
+  const lo = at(Math.max(0.03, Math.min(0.90, 0.35 / bias)));
+
+  const energyAt = (t) => {
+    const i = Math.round(t / probe) % samples.length;
+    return samples[(i + samples.length) % samples.length].e;
+  };
+
+  const times = [];
+  let t = phase;
+  for (let i = 0; i < count; i++) {
+    times.push(Math.max(0, t));
+    const e = energyAt(buffer.duration ? t % buffer.duration : 0);
+    const sub = e >= hi ? 4 : e >= lo ? 2 : 1;
+    t += beat / sub;
+  }
+  return times;
+}
+
 export async function decodeFile(file) {
   const buf = await file.arrayBuffer();
   return audioContext().decodeAudioData(buf);

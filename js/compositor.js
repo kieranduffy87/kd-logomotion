@@ -256,6 +256,30 @@ function stampLocked(ctx, W, H, frame, state, ink, blend) {
     return;
   }
 
+  /* Outline treatment strokes the traced paths instead of stamping the fill,
+     which needs the mark's own geometry rather than its pixels. */
+  if (frame.treatment === "outline" && logo.paths && logo.paths.length) {
+    const box = lockedRect(W, H, frame, state);
+    ctx.save();
+    if (blend) ctx.globalCompositeOperation = blend;
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = Math.max(1.5, W * (frame.stroke || 0.006));
+    ctx.lineJoin = "round";
+    logo.paths.forEach((pts) => {
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => {
+        const px = box.x + x * box.w;
+        const py = box.y + y * box.h;
+        if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+      });
+      const a = pts[0], b = pts[pts.length - 1];
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.04) ctx.closePath();
+      ctx.stroke();
+    });
+    ctx.restore();
+    return;
+  }
+
   const w = LOCK_BOX.w * W * place.scale;
   const h = LOCK_BOX.h * H * place.scale;
   stampLogo(
@@ -282,6 +306,31 @@ function scrim(ctx, W, H, amount, tone) {
 
 /* Where the mark actually lands, after contain-fitting inside the lock box.
    The vector scene needs this to line its anchors up with the artwork. */
+/* A frame may override the scene's ink outright, or ask for one of the marks
+   own colours. Keeping this in one place means every path — scenes, plates,
+   dropped backgrounds — honours the override identically. */
+export const INK_MODES = [
+  { id: "auto",  label: "Auto" },
+  { id: "ink",   label: "Ink" },
+  { id: "paper", label: "Paper" },
+  { id: "brand", label: "Brand" },
+  { id: "logo",  label: "Own" },
+];
+
+export function resolveInk(frame, state, auto) {
+  const logo = state.logo;
+  switch (frame.ink) {
+    case "ink":   return PALETTE.inkSoft;
+    case "paper": return PALETTE.paperWhite;
+    case "brand": return PALETTE.blue;
+    case "logo":  return (logo && logo.palette && logo.palette[0]) || PALETTE.blue;
+    case undefined:
+    case null:
+    case "auto":  return auto;
+    default:      return frame.ink;   /* a custom hex */
+  }
+}
+
 export function lockedRect(W, H, frame, state) {
   const place = placementOf(frame, state);
   const bw = LOCK_BOX.w * W * place.scale;
@@ -421,7 +470,7 @@ function paintMark(ctx, W, H, frame, state, isCustom) {
   /* Outline mode: the scene draws the path itself, so stamping the filled
      artwork underneath would bury it. */
   if (!(scene && scene.hideMark)) {
-    stampLocked(ctx, W, H, frame, state, ink, scene && scene.lockBlend);
+    stampLocked(ctx, W, H, frame, state, resolveInk(frame, state, ink), scene && scene.lockBlend);
   }
 
   if (scene && scene.over) {

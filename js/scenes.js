@@ -935,6 +935,8 @@ function baseFrame(tone) {
     dy: 0,
     rotate: 0,
     fx: { invert: 0, brightness: 1, contrast: 1, grayscale: 0 },
+    ink: "auto",
+    treatment: "auto",
   };
 }
 

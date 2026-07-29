@@ -6,10 +6,10 @@ import { PLATES, loadPlatesFor, onPlateLoad } from "./plates.js";
 import {
   BEDS, BED_BY_ID, renderBed, decodeFile, detectBpm,
   TRACKS, TRACK_BY_ID, loadTrack,
-  fitBuffer, audioContext, bedSeconds, beatPhase, beatTimes,
+  fitBuffer, audioContext, bedSeconds, beatPhase, beatMap,
   holdForBpm, SUBDIVISIONS,
 } from "./audio.js";
-import { renderThumb, renderFrame, FRAME_W, FRAME_H, FX_DEFAULT, fxString } from "./compositor.js";
+import { renderThumb, renderFrame, FRAME_W, FRAME_H, FX_DEFAULT, fxString, INK_MODES } from "./compositor.js";
 import { Player, SPEEDS, formatTime } from "./player.js";
 import { exportReel, download, canEncodeMp4, estimate } from "./export.js";
 
@@ -267,6 +267,8 @@ let trackBuf = null;
 let userTrack = null;      /* decoded upload, before fitting */
 let userBpm = null;
 let userPhase = 0;
+let bedReference = null;   /* short render of the current bed, for analysis */
+let adaptive = true;
 
 function currentBpm() {
   if (userTrack) return userBpm || 120;
@@ -292,17 +294,48 @@ function currentPhase() {
    pulse train to find where the downbeat actually falls. */
 let subdivision = 2;
 
+/* The buffer the map is read from. The bed is rendered to fit the reel, which
+   depends on the map, which would be circular — so beds map against a short
+   reference render and real tracks against themselves. */
+function analysisBuffer() {
+  if (userTrack) return userTrack;
+  if (trackBuf) return trackBuf;
+  return bedReference;
+}
+
 function rebuildCuts() {
   const bpm = currentBpm();
   if (!bpm || !model.frames.length) { model.cuts = null; return; }
 
+  const phase = currentPhase();
+  const src = analysisBuffer();
+
+  if (src && adaptive) {
+    /* Subdivision biases the whole map: picking a faster chip makes every
+       passage cut harder, it does not flatten the variation out. */
+    const bias = subdivision / 2;
+    const times = beatMap(src, bpm, phase, model.frames.length, bias);
+    model.cuts = times.map((t) => Math.round(t * 1000));
+    const spans = model.cuts.slice(1).map((t, i) => t - model.cuts[i]);
+    player.setHold(Math.round(spans.reduce((a, b) => a + b, 0) / Math.max(1, spans.length)));
+    return;
+  }
+
   const step = holdForBpm(bpm, subdivision);
-  const phase = currentPhase() * 1000;
-  model.cuts = model.frames.map((_, i) => Math.round(phase + i * step));
+  model.cuts = model.frames.map((_, i) => Math.round(phase * 1000 + i * step));
   player.setHold(Math.round(step));
 }
 
 async function rebuildAudio() {
+  /* Beds have to exist before they can be analysed, so render a reference at
+     a fixed length first and map against that. */
+  if (bedId && !userTrack && !trackBuf) {
+    const bed = BED_BY_ID[bedId];
+    bedReference = await renderBed(bedId, bed.bpm, bedSeconds(bed.bpm));
+  } else if (!bedId) {
+    bedReference = null;
+  }
+
   rebuildCuts();
   /* Match the exported length, so the bed ends where the picture does. */
   const seconds = estimate(model.frames.length, player.holdMs, model.cuts).seconds;
@@ -401,6 +434,13 @@ async function acceptAudio(file) {
   }
 }
 
+/* Pacing: follow the music's energy, or hold one rate for the whole reel. */
+$("adaptiveChip").addEventListener("click", async () => {
+  adaptive = !adaptive;
+  $("adaptiveChip").classList.toggle("is-active", adaptive);
+  await rebuildAudio();
+});
+
 /* ----------------------------------------------------------------- beat */
 
 const speedWrap = $("speeds");
@@ -443,10 +483,23 @@ function syncSpeedChips() {
   });
 
   const label = SUBDIVISIONS.find((x) => x.id === subdivision);
-  $("beatNote").textContent = bpm
-    ? `${player.holdMs}ms per cut · ${formatTime(player.duration)} · ` +
-      `${label ? label.label : ""} note at ${bpm} BPM`
-    : `${player.holdMs}ms per cut · ${formatTime(player.duration)} total · silent`;
+  if (!bpm) {
+    $("beatNote").textContent =
+      `${player.holdMs}ms per cut · ${formatTime(player.duration)} total · silent`;
+    return;
+  }
+  if (adaptive && model.cuts && model.cuts.length > 2) {
+    const spans = model.cuts.slice(1).map((t, i) => t - model.cuts[i]);
+    const fastest = Math.min(...spans);
+    const slowest = Math.max(...spans);
+    $("beatNote").textContent =
+      `${fastest}–${slowest}ms per cut · ${formatTime(player.duration)} · ` +
+      `following the music at ${bpm} BPM`;
+    return;
+  }
+  $("beatNote").textContent =
+    `${player.holdMs}ms per cut · ${formatTime(player.duration)} · ` +
+    `${label ? label.label : ""} note at ${bpm} BPM`;
 }
 
 /* ------------------------------------------------------------ transport */
@@ -718,6 +771,7 @@ function select(key) {
     editor.querySelectorAll("[data-tone]").forEach((b) =>
       b.classList.toggle("is-active", b.dataset.tone === f.tone));
     syncFx();
+    syncMark();
   }
   [...framesEl.children].forEach((li) =>
     li.classList.toggle("is-selected", li.dataset.key === key));
@@ -804,6 +858,75 @@ $("customBg").addEventListener("change", (e) => {
   };
   img.src = url;
 });
+
+/* ------------------------------------------------------------ mark ink */
+
+const inkWrap = $("frameInk");
+INK_MODES.forEach((m) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "kd-chip";
+  b.textContent = m.label;
+  b.dataset.mode = m.id;
+  b.addEventListener("click", () => {
+    const f = currentFrame();
+    if (!f) return;
+    f.ink = m.id;
+    syncMark();
+    repaintFrame();
+  });
+  inkWrap.appendChild(b);
+});
+
+editor.querySelectorAll("[data-treat]").forEach((b) => {
+  b.addEventListener("click", () => {
+    const f = currentFrame();
+    if (!f) return;
+    f.treatment = b.dataset.treat;
+    syncMark();
+    repaintFrame();
+  });
+});
+
+$("ctlInkColour").addEventListener("input", (e) => {
+  const f = currentFrame();
+  if (!f) return;
+  f.ink = e.target.value;      /* a raw hex wins over every named mode */
+  syncMark();
+  repaintFrame();
+});
+
+$("ctlStroke").addEventListener("input", (e) => {
+  const f = currentFrame();
+  if (!f) return;
+  f.stroke = Number(e.target.value) / 1000;
+  $("outStroke").textContent = `${(f.stroke * 100).toFixed(1)}%`;
+  repaintFrame();
+});
+
+function syncMark() {
+  const f = currentFrame();
+  if (!f) return;
+  const named = INK_MODES.some((m) => m.id === f.ink);
+  inkWrap.querySelectorAll("[data-mode]").forEach((b) => {
+    b.classList.toggle("is-active", named && b.dataset.mode === f.ink);
+  });
+  editor.querySelectorAll("[data-treat]").forEach((b) => {
+    b.classList.toggle("is-active", (f.treatment || "auto") === b.dataset.treat);
+  });
+  if (!named && typeof f.ink === "string") $("ctlInkColour").value = f.ink;
+
+  const outline = f.treatment === "outline";
+  $("strokeField").hidden = !outline;
+  $("ctlStroke").value = String(Math.round((f.stroke || 0.006) * 1000));
+  $("outStroke").textContent = `${((f.stroke || 0.006) * 100).toFixed(1)}%`;
+}
+
+function repaintFrame() {
+  player.draw();
+  thumbCache.clear();
+  renderFrames();
+}
 
 /* ------------------------------------------------------------ adjust fx */
 
