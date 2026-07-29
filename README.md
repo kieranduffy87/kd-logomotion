@@ -1,8 +1,9 @@
 # KD Logomotion
 
 Drop in a logo, get a vertical brand film back. The mark is locked dead centre
-and never moves; twenty-four worlds cut past behind it on the beat. Exported
-as an MP4, with sound, without leaving the browser.
+and never moves while the worlds cut past behind it. Load a soundtrack and it
+becomes the reel's clock. Exported as an MP4, with sound, without leaving the
+browser.
 
 **The centre lock is the whole idea.** The mark is stamped into the same box on
 every single frame — same size, no rotation, no perspective, no drift. Holding
@@ -140,8 +141,6 @@ lightness — a saturated blue is far darker than it looks.
 **Timeline** — a tick per cut rather than a plain slider: the reel's rhythm is
 the thing being edited, so the control shows where every cut falls. Scrubbing
 snaps to a cut, because there is no meaningful position between two of them.
-When the reel is locked to a track the ticks are unevenly spaced, and that
-spacing *is* the music.
 
 **Sound** (`js/audio.js`) — **the track is the clock.** Load a soundtrack and
 the reel becomes exactly as long as it, with the frames dividing that length
