@@ -102,6 +102,12 @@ function tracked(ctx, text, x, y, spacing, align) {
   return total;
 }
 
+/* The short edge. Type, strokes and insets are sized against this rather than
+   against width: at 16:9 the width is the long edge, so width-based type comes
+   out enormous, and at 9:16 it comes out tiny. The short edge is the one thing
+   that means the same at every aspect. */
+const unitOf = (g) => Math.min(g.W, g.H);
+
 const paperOf = (tone) => (tone === "light" ? PALETTE.paper : PALETTE.ink);
 const inkOf = (tone) => (tone === "light" ? PALETTE.inkSoft : PALETTE.paperWhite);
 
@@ -165,6 +171,7 @@ export const SCENES = [
     ink: (tone) => (tone === "light" ? PALETTE.white : PALETTE.blue),
     draw(g) {
       const { ctx, W, H } = g;
+      const u = unitOf(g);
       if (g.tone === "light") {
         fill(g, PALETTE.blue);
         const glow = ctx.createRadialGradient(W * 0.5, H * 0.42, 0, W * 0.5, H * 0.42, W * 0.9);
@@ -186,18 +193,19 @@ export const SCENES = [
     ink: (tone) => inkOf(tone),
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       fill(g, tone === "light" ? PALETTE.paperWarm : "#16181d");
-      const m = W * 0.09;
+      const m = u * 0.09;
       ctx.strokeStyle = tone === "light" ? "rgba(14,15,18,0.18)" : "rgba(236,238,242,0.18)";
-      ctx.lineWidth = Math.max(1, W * 0.0018);
-      roundRect(ctx, m, m, W - m * 2, H - m * 2, W * 0.028);
+      ctx.lineWidth = Math.max(1, u * 0.0018);
+      roundRect(ctx, m, m, W - m * 2, H - m * 2, u * 0.028);
       ctx.stroke();
 
       ctx.fillStyle = tone === "light" ? PALETTE.muted : "#8f939d";
-      ctx.font = `600 ${Math.round(W * 0.022)}px ${FONT}`;
+      ctx.font = `600 ${Math.round(u * 0.022)}px ${FONT}`;
       ctx.textBaseline = "middle";
-      tracked(ctx, "KD LOGOMOTION", W / 2, m + W * 0.055, W * 0.006, "center");
-      tracked(ctx, "01 — MARK", W / 2, H - m - W * 0.055, W * 0.006, "center");
+      tracked(ctx, "KD LOGOMOTION", W / 2, m + u * 0.055, u * 0.006, "center");
+      tracked(ctx, "01 — MARK", W / 2, H - m - u * 0.055, u * 0.006, "center");
       addGrain(g, 0.04);
     },
   },
@@ -208,13 +216,48 @@ export const SCENES = [
     slot: { cx: 0.5, cy: 0.45, w: 0.52, h: 0.22 },
     ink: (tone) => inkOf(tone),
     draw(g) {
-      const { ctx, W, H, tone } = g;
+      const { ctx, W, H, tone, shape } = g;
+      const u = unitOf(g);
       fill(g, paperOf(tone));
       const ink = inkOf(tone);
-      const pad = W * 0.09;
+      const pad = u * 0.09;
+
+      /* Wide reels get a different poster, not a squashed one: the rules run
+         short across the top, the headline sits in the left column and the
+         mark keeps the right. Stacking a tall layout into a landscape frame
+         runs the headline straight through the mark. */
+      if (shape === "wide") {
+        const col = W * 0.46;
+        ctx.strokeStyle = tone === "light" ? "rgba(14,15,18,0.16)" : "rgba(236,238,242,0.16)";
+        ctx.lineWidth = Math.max(1, u * 0.0016);
+        ctx.beginPath();
+        ctx.moveTo(pad, H * 0.20); ctx.lineTo(col, H * 0.20);
+        ctx.moveTo(pad, H * 0.845); ctx.lineTo(col, H * 0.845);
+        ctx.stroke();
+
+        ctx.fillStyle = tone === "light" ? PALETTE.muted : "#8f939d";
+        ctx.font = `600 ${Math.round(u * 0.028)}px ${FONT}`;
+        ctx.textBaseline = "alphabetic";
+        tracked(ctx, "IDENTITY", pad, H * 0.155, u * 0.008, "left");
+
+        /* The mark is locked to the centre, so the type has to stay out of the
+           middle band entirely rather than flow through it. */
+        ctx.font = `500 ${Math.round(u * 0.085)}px ${FONT}`;
+        const wa = "Built to ";
+        ctx.fillStyle = ink;
+        ctx.fillText(wa, pad, H * 0.735);
+        ctx.fillStyle = PALETTE.blue;
+        ctx.fillText("move.", pad + ctx.measureText(wa).width, H * 0.735);
+
+        ctx.fillStyle = tone === "light" ? PALETTE.muted : "#8f939d";
+        ctx.font = `400 ${Math.round(u * 0.03)}px ${FONT}`;
+        ctx.fillText("Kieran Duffy — brand and interface design", pad, H * 0.79);
+        addGrain(g, 0.05);
+        return;
+      }
 
       ctx.strokeStyle = tone === "light" ? "rgba(14,15,18,0.16)" : "rgba(236,238,242,0.16)";
-      ctx.lineWidth = Math.max(1, W * 0.0016);
+      ctx.lineWidth = Math.max(1, u * 0.0016);
       [H * 0.155, H * 0.63].forEach((y) => {
         ctx.beginPath();
         ctx.moveTo(pad, y);
@@ -223,15 +266,15 @@ export const SCENES = [
       });
 
       ctx.fillStyle = tone === "light" ? PALETTE.muted : "#8f939d";
-      ctx.font = `600 ${Math.round(W * 0.023)}px ${FONT}`;
+      ctx.font = `600 ${Math.round(u * 0.023)}px ${FONT}`;
       ctx.textBaseline = "alphabetic";
-      tracked(ctx, "IDENTITY", pad, H * 0.125, W * 0.007, "left");
+      tracked(ctx, "IDENTITY", pad, H * 0.125, u * 0.007, "left");
       ctx.textAlign = "right";
       ctx.fillText("2026", W - pad, H * 0.125);
       ctx.textAlign = "left";
 
       /* One display line, one accented word — the house rule. */
-      ctx.font = `500 ${Math.round(W * 0.135)}px ${FONT}`;
+      ctx.font = `500 ${Math.round(u * 0.135)}px ${FONT}`;
       const a = "Built to ";
       const b = "move.";
       ctx.fillStyle = ink;
@@ -240,7 +283,7 @@ export const SCENES = [
       ctx.fillText(b, pad + ctx.measureText(a).width, H * 0.755);
 
       ctx.fillStyle = tone === "light" ? PALETTE.muted : "#8f939d";
-      ctx.font = `400 ${Math.round(W * 0.032)}px ${FONT}`;
+      ctx.font = `400 ${Math.round(u * 0.032)}px ${FONT}`;
       ctx.fillText("Kieran Duffy — brand and interface design", pad, H * 0.815);
       addGrain(g, 0.05);
     },
@@ -253,6 +296,7 @@ export const SCENES = [
     ink: (tone) => (tone === "light" ? PALETTE.inkSoft : PALETTE.white),
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       const dark = tone !== "light";
       /* Faint blue paper, so the light plate reads as a drafting sheet rather
          than washed-out grey. */
@@ -262,7 +306,7 @@ export const SCENES = [
 
       const step = W / 12;
       ctx.strokeStyle = rule;
-      ctx.lineWidth = Math.max(1, W * 0.0012);
+      ctx.lineWidth = Math.max(1, u * 0.0012);
       ctx.beginPath();
       for (let x = step; x < W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
       for (let y = step; y < H; y += step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
@@ -270,7 +314,7 @@ export const SCENES = [
 
       const cx = W / 2, cy = H / 2;
       ctx.strokeStyle = strong;
-      ctx.lineWidth = Math.max(1, W * 0.0018);
+      ctx.lineWidth = Math.max(1, u * 0.0018);
       [W * 0.20, W * 0.30, W * 0.40].forEach((r) => {
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -282,7 +326,7 @@ export const SCENES = [
       ctx.stroke();
 
       /* Measurement ticks down the left margin. */
-      ctx.lineWidth = Math.max(1, W * 0.0014);
+      ctx.lineWidth = Math.max(1, u * 0.0014);
       for (let y = H * 0.16; y < H * 0.85; y += W * 0.035) {
         const long = Math.round((y - H * 0.16) / (W * 0.035)) % 5 === 0;
         ctx.beginPath();
@@ -292,10 +336,10 @@ export const SCENES = [
       }
 
       ctx.fillStyle = strong;
-      ctx.font = `600 ${Math.round(W * 0.021)}px ${FONT}`;
+      ctx.font = `600 ${Math.round(u * 0.021)}px ${FONT}`;
       ctx.textBaseline = "middle";
-      tracked(ctx, "CONSTRUCTION", W * 0.055, H * 0.10, W * 0.006, "left");
-      tracked(ctx, "1 : 1", W * 0.055, H * 0.92, W * 0.006, "left");
+      tracked(ctx, "CONSTRUCTION", W * 0.055, H * 0.10, u * 0.006, "left");
+      tracked(ctx, "1 : 1", W * 0.055, H * 0.92, u * 0.006, "left");
     },
   },
 
@@ -306,6 +350,7 @@ export const SCENES = [
     ink: (tone) => (tone === "light" ? PALETTE.white : PALETTE.blue),
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       fill(g, tone === "light" ? PALETTE.paper : PALETTE.ink);
       const pw = W * 0.8, ph = H * 0.25;
       const x = (W - pw) / 2, y = (H - ph) / 2;
@@ -321,7 +366,7 @@ export const SCENES = [
 
       /* Ghost pills above and below, so it reads as a stack of chips. */
       ctx.strokeStyle = tone === "light" ? "rgba(14,15,18,0.14)" : "rgba(236,238,242,0.14)";
-      ctx.lineWidth = Math.max(1, W * 0.0016);
+      ctx.lineWidth = Math.max(1, u * 0.0016);
       [-1, 1].forEach((d) => {
         const gh = ph * 0.6;
         const gw = pw * 0.84;
@@ -339,6 +384,7 @@ export const SCENES = [
     ink: (tone) => (tone === "light" ? PALETTE.inkSoft : PALETTE.white),
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       fill(g, tone === "light" ? PALETTE.paperWarm : "#05060a");
       addGrain(g, 0.05);
 
@@ -354,14 +400,14 @@ export const SCENES = [
       ctx.restore();
 
       ctx.strokeStyle = tone === "light" ? "rgba(14,15,18,0.10)" : "rgba(236,238,242,0.10)";
-      ctx.lineWidth = Math.max(1, W * 0.0014);
+      ctx.lineWidth = Math.max(1, u * 0.0014);
       roundRect(ctx, x, y, cw, ch, W * 0.032);
       ctx.stroke();
 
       ctx.fillStyle = PALETTE.blue;
-      ctx.font = `600 ${Math.round(W * 0.021)}px ${FONT}`;
+      ctx.font = `600 ${Math.round(u * 0.021)}px ${FONT}`;
       ctx.textBaseline = "middle";
-      tracked(ctx, "BRAND MARK", x + W * 0.055, y + W * 0.06, W * 0.006, "left");
+      tracked(ctx, "BRAND MARK", x + W * 0.055, y + W * 0.06, u * 0.006, "left");
 
       ctx.strokeStyle = tone === "light" ? "rgba(14,15,18,0.12)" : "rgba(236,238,242,0.12)";
       ctx.beginPath();
@@ -370,7 +416,7 @@ export const SCENES = [
       ctx.stroke();
 
       ctx.fillStyle = tone === "light" ? PALETTE.muted : "#8f939d";
-      ctx.font = `400 ${Math.round(W * 0.026)}px ${FONT}`;
+      ctx.font = `400 ${Math.round(u * 0.026)}px ${FONT}`;
       ctx.fillText(g.logoName || "Your logo", x + W * 0.055, y + ch - W * 0.038);
     },
   },
@@ -378,7 +424,8 @@ export const SCENES = [
   {
     id: "palette",
     name: "Palette",
-    lockBlend: "difference",
+    /* No difference blend: over the blue band it resolves to yellow, which is
+       nowhere in the system. A flat readable ink is the honest answer. */
     /* The mark is stamped band by band under a clip, so it picks up a new ink
        as it crosses each swatch. A blend mode would be simpler but difference
        against blue lands on yellow, which is nowhere in the system. */
@@ -386,6 +433,7 @@ export const SCENES = [
     ink: () => PALETTE.white,
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       const light = [
         { bg: PALETTE.paper, ink: PALETTE.inkSoft },
         { bg: PALETTE.paperWarm, ink: PALETTE.blue },
@@ -413,6 +461,7 @@ export const SCENES = [
     ink: (tone) => inkOf(tone),
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       fill(g, paperOf(tone));
       const cols = 6, rows = 11;
       const cw = W / cols, chh = H / rows;
@@ -432,7 +481,7 @@ export const SCENES = [
       }
 
       ctx.strokeStyle = tone === "light" ? "rgba(14,15,18,0.10)" : "rgba(236,238,242,0.10)";
-      ctx.lineWidth = Math.max(1, W * 0.0012);
+      ctx.lineWidth = Math.max(1, u * 0.0012);
       ctx.beginPath();
       for (let c = 1; c < cols; c++) { ctx.moveTo(c * cw, 0); ctx.lineTo(c * cw, H); }
       for (let r = 1; r < rows; r++) { ctx.moveTo(0, r * chh); ctx.lineTo(W, r * chh); }
@@ -462,6 +511,7 @@ export const SCENES = [
     ink: (tone) => inkOf(tone),
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       fill(g, tone === "light" ? PALETTE.paper : PALETTE.ink);
 
       const bandH = H * 0.16;
@@ -477,7 +527,7 @@ export const SCENES = [
           ctx.fillRect(0, b.y, W, bandH);
         } else {
           ctx.strokeStyle = tone === "light" ? "rgba(14,15,18,0.14)" : "rgba(236,238,242,0.14)";
-          ctx.lineWidth = Math.max(1, W * 0.0014);
+          ctx.lineWidth = Math.max(1, u * 0.0014);
           ctx.beginPath();
           ctx.moveTo(0, b.y); ctx.lineTo(W, b.y);
           ctx.moveTo(0, b.y + bandH); ctx.lineTo(W, b.y + bandH);
@@ -504,6 +554,7 @@ export const SCENES = [
     ink: (tone) => (tone === "light" ? PALETTE.white : PALETTE.blue),
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       if (tone === "light") {
         const base = ctx.createLinearGradient(0, 0, W * 0.6, H);
         base.addColorStop(0, "#0a0f22");
@@ -548,6 +599,7 @@ export const SCENES = [
     ink: () => PALETTE.white,
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       const light = tone === "light";
       fill(g, light ? PALETTE.paper : PALETTE.ink);
       ctx.fillStyle = light ? PALETTE.ink : PALETTE.paper;
@@ -560,7 +612,7 @@ export const SCENES = [
       ctx.fill();
 
       ctx.strokeStyle = PALETTE.blue;
-      ctx.lineWidth = Math.max(2, W * 0.005);
+      ctx.lineWidth = Math.max(2, u * 0.005);
       ctx.beginPath();
       ctx.moveTo(0, H * 0.78);
       ctx.lineTo(W, H * 0.28);
@@ -576,6 +628,7 @@ export const SCENES = [
     ink: (tone) => (tone === "light" ? PALETTE.paperWhite : PALETTE.inkSoft),
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       const light = tone === "light";
 
       /* A stand-in for photography: soft bands plus grain under the house scrim. */
@@ -627,7 +680,7 @@ export const SCENES = [
 
       /* Glass tag, top left — the kd-tag--glass treatment. */
       const tx = W * 0.09, ty = H * 0.09;
-      ctx.font = `600 ${Math.round(W * 0.022)}px ${FONT}`;
+      ctx.font = `600 ${Math.round(u * 0.022)}px ${FONT}`;
       const label = "BRAND FILM";
       const tw = ctx.measureText(label).width + W * 0.022 * 0.12 * (label.length - 1);
       const padX = W * 0.035, padY = W * 0.022;
@@ -635,7 +688,7 @@ export const SCENES = [
       roundRect(ctx, tx, ty, tw + padX * 2, padY * 2 + W * 0.022, (padY * 2 + W * 0.022) / 2);
       ctx.fill();
       ctx.strokeStyle = light ? "rgba(255,255,255,0.5)" : "rgba(236,238,242,0.3)";
-      ctx.lineWidth = Math.max(1, W * 0.0014);
+      ctx.lineWidth = Math.max(1, u * 0.0014);
       ctx.stroke();
       ctx.fillStyle = light ? "#16181d" : PALETTE.paperWhite;
       ctx.textBaseline = "middle";
@@ -655,6 +708,7 @@ export const SCENES = [
     },
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       const brand = (g.brand && g.brand[0]) || PALETTE.blue;
       const second = (g.brand && g.brand[1]) || shade(brand, -0.45);
 
@@ -676,6 +730,7 @@ export const SCENES = [
     ink: () => PALETTE.white,
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       const brand = g.brand && g.brand.length ? g.brand : [PALETTE.blue];
       /* Each brand colour, plus tints of the first, so a one-colour logo still
          fills the frame with a ramp that belongs to it. */
@@ -701,8 +756,57 @@ export const SCENES = [
     slot: { cx: 0.5, cy: 0.5, w: 0.3, h: 0.16 },
     ink: (tone) => (tone === "light" ? PALETTE.white : PALETTE.blue),
     draw(g) {
-      const { ctx, W, H, tone } = g;
+      const { ctx, W, H, tone, shape } = g;
+      const u = unitOf(g);
       const light = tone === "light";
+
+      /* A phone home screen only means anything in a tall frame. Wide and
+         square reels get the icon on a desk surface instead — same idea, a
+         tile among tiles, without pretending a landscape frame is a handset. */
+      if (shape !== "tall") {
+        const base = ctx.createLinearGradient(0, 0, W, H);
+        base.addColorStop(0, light ? "#141a2c" : "#f2f2f5");
+        base.addColorStop(1, light ? "#05070f" : "#d9dbe2");
+        ctx.fillStyle = base;
+        ctx.fillRect(0, 0, W, H);
+
+        const glow = ctx.createRadialGradient(W / 2, H * 0.46, 0, W / 2, H * 0.46, u * 1.1);
+        glow.addColorStop(0, light ? "rgba(3,57,248,0.28)" : "rgba(3,57,248,0.12)");
+        glow.addColorStop(1, "rgba(3,57,248,0)");
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, W, H);
+
+        /* A row of ghost tiles either side of the hero, so it reads as one
+           icon in a set rather than a floating square. */
+        const big = u * 0.46;
+        const gap = big * 0.26;
+        const small = big * 0.52;
+        [-1, 1].forEach((side) => {
+          for (let i = 1; i <= 2; i++) {
+            const x = W / 2 + side * (big / 2 + gap + (i - 1) * (small + gap * 0.7));
+            ctx.fillStyle = light ? "rgba(255,255,255,0.09)" : "rgba(14,15,18,0.07)";
+            roundRect(ctx, side > 0 ? x : x - small, H / 2 - small / 2, small, small, small * 0.24);
+            ctx.fill();
+          }
+        });
+
+        ctx.save();
+        ctx.shadowColor = "rgba(0,0,0,0.45)";
+        ctx.shadowBlur = u * 0.07;
+        ctx.shadowOffsetY = u * 0.022;
+        ctx.fillStyle = light ? PALETTE.blue : PALETTE.white;
+        roundRect(ctx, (W - big) / 2, (H - big) / 2, big, big, big * 0.24);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.fillStyle = light ? "rgba(244,244,246,0.85)" : "rgba(14,15,18,0.7)";
+        ctx.font = `500 ${Math.round(u * 0.034)}px ${FONT}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(g.logoName || "Logomotion", W / 2, H / 2 + big / 2 + u * 0.06);
+        ctx.textAlign = "left";
+        return;
+      }
 
       const sky = ctx.createLinearGradient(0, 0, W * 0.4, H);
       if (light) {
@@ -727,7 +831,7 @@ export const SCENES = [
          reads as one icon among many rather than a floating square. */
       const chrome = light ? "rgba(244,244,246,0.9)" : "rgba(14,15,18,0.75)";
       ctx.fillStyle = chrome;
-      ctx.font = `600 ${Math.round(W * 0.032)}px ${FONT}`;
+      ctx.font = `600 ${Math.round(u * 0.032)}px ${FONT}`;
       ctx.textBaseline = "middle";
       ctx.fillText("9:41", W * 0.1, H * 0.055);
       roundRect(ctx, W * 0.78, H * 0.047, W * 0.12, W * 0.028, W * 0.008);
@@ -761,7 +865,7 @@ export const SCENES = [
       ctx.restore();
 
       ctx.fillStyle = chrome;
-      ctx.font = `500 ${Math.round(W * 0.03)}px ${FONT}`;
+      ctx.font = `500 ${Math.round(u * 0.03)}px ${FONT}`;
       ctx.textAlign = "center";
       ctx.fillText(g.logoName || "Logomotion", W / 2, by + big + W * 0.055);
       ctx.textAlign = "left";
@@ -784,6 +888,7 @@ export const SCENES = [
     hideMark: true,
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       const light = tone === "light";
       fill(g, light ? "#ffffff" : "#0b0d12");
 
@@ -797,15 +902,16 @@ export const SCENES = [
       ctx.stroke();
 
       ctx.fillStyle = light ? PALETTE.muted : "#8f939d";
-      ctx.font = `600 ${Math.round(W * 0.021)}px ${FONT}`;
+      ctx.font = `600 ${Math.round(u * 0.021)}px ${FONT}`;
       ctx.textBaseline = "middle";
-      tracked(ctx, "OUTLINE", W * 0.08, H * 0.08, W * 0.006, "left");
-      tracked(ctx, `${g.anchorCount || 0} ANCHORS`, W * 0.92, H * 0.08, W * 0.006, "right");
+      tracked(ctx, "OUTLINE", W * 0.08, H * 0.08, u * 0.006, "left");
+      tracked(ctx, `${g.anchorCount || 0} ANCHORS`, W * 0.92, H * 0.08, u * 0.006, "right");
     },
 
     /* Runs after the mark is stamped, so the path sits on top of the artwork. */
     over(g) {
       const { ctx, W, H, tone, box, paths } = g;
+      const u = unitOf(g);
       if (!box) return;
       const accent = PALETTE.blue;
       const light = tone === "light";
@@ -819,7 +925,7 @@ export const SCENES = [
       /* Dimension guides out to the margins, kept faint. */
       ctx.strokeStyle = accent;
       ctx.globalAlpha = 0.28;
-      ctx.lineWidth = Math.max(1, W * 0.0012);
+      ctx.lineWidth = Math.max(1, u * 0.0012);
       ctx.setLineDash([W * 0.012, W * 0.01]);
       ctx.beginPath();
       ctx.moveTo(0, box.y); ctx.lineTo(W, box.y);
@@ -834,7 +940,7 @@ export const SCENES = [
 
       /* The path itself: a hairline, the way an outline preview looks. */
       ctx.strokeStyle = stroke;
-      ctx.lineWidth = Math.max(1.5, W * 0.003);
+      ctx.lineWidth = Math.max(1.5, u * 0.003);
       ctx.lineJoin = "miter";
       paths.forEach((pts) => {
         ctx.beginPath();
@@ -858,7 +964,7 @@ export const SCENES = [
           const my = py((a[1] + b[1]) / 2);
 
           ctx.strokeStyle = accent;
-          ctx.lineWidth = Math.max(1, W * 0.0016);
+          ctx.lineWidth = Math.max(1, u * 0.0016);
           ctx.beginPath();
           ctx.arc(mx, my, mid, 0, Math.PI * 2);
           ctx.stroke();
@@ -889,6 +995,7 @@ export const SCENES = [
     ink: (tone) => (tone === "light" ? PALETTE.paperWhite : PALETTE.blueDeep),
     draw(g) {
       const { ctx, W, H, tone } = g;
+      const u = unitOf(g);
       fill(g, tone === "light" ? PALETTE.blueDeep : PALETTE.paperWhite);
       const vig = ctx.createRadialGradient(W * 0.5, H * 0.45, 0, W * 0.5, H * 0.45, W * 1.05);
       vig.addColorStop(0, tone === "light" ? "rgba(3,57,248,0.32)" : "rgba(255,255,255,0)");

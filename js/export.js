@@ -2,7 +2,10 @@
    WebCodecs H.264 into an MP4 container where the browser allows it, with a
    MediaRecorder WebM fallback so nobody leaves empty handed. */
 
-import { renderFrame, FRAME_W, FRAME_H } from "./compositor.js";
+import { renderFrame, frameSize, QUALITIES } from "./compositor.js";
+/* gifenc ships a CommonJS bundle with no browser global, so the ESM build
+   is the one to use — which suits a project that is modules throughout. */
+import { GIFEncoder, quantize, applyPalette } from "../vendor/gifenc.esm.js";
 
 const FPS = 30;
 const TICK_US = Math.round(1_000_000 / FPS);
@@ -107,10 +110,17 @@ async function encodeAudio(encoder, buffer) {
   await encoder.flush();
 }
 
+/* The reel's output size: aspect decides the shape, quality the short edge. */
+export function outputSize(model) {
+  const q = QUALITIES.find((x) => x.id === model.quality) || QUALITIES[1];
+  return frameSize(model.aspect || "9:16", q.short);
+}
+
 async function encodeMp4(model, holdMs, onProgress, signal) {
   const { Muxer, ArrayBufferTarget } = window.Mp4Muxer || {};
   if (!Muxer) throw new Error("The MP4 muxer did not load.");
 
+  const { w: FRAME_W, h: FRAME_H } = outputSize(model);
   const codec = await pickCodec(FRAME_W, FRAME_H);
   if (!codec) throw new Error("This browser has no H.264 encoder available.");
 
@@ -132,11 +142,14 @@ async function encodeMp4(model, holdMs, onProgress, signal) {
     output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
     error: (e) => { encodeError = e; },
   });
+  /* Scale the bitrate with the pixel count: 8 Mbps is right for 1080 vertical
+     and leaves 4K looking mushy. */
+  const bitrate = Math.round(8_000_000 * ((FRAME_W * FRAME_H) / (1080 * 1920)));
   encoder.configure({
     codec,
     width: FRAME_W,
     height: FRAME_H,
-    bitrate: 8_000_000,
+    bitrate: Math.max(2_000_000, Math.min(60_000_000, bitrate)),
     framerate: FPS,
     latencyMode: "quality",
   });
@@ -216,6 +229,7 @@ function pickWebmType() {
 /* Real-time capture: the reel plays once into a recorder, so this takes about
    as long as the video itself. */
 function encodeWebm(model, holdMs, onProgress, signal) {
+  const { w: FRAME_W, h: FRAME_H } = outputSize(model);
   return new Promise((resolve, reject) => {
     const mime = pickWebmType();
     if (!mime) {
@@ -266,10 +280,84 @@ function encodeWebm(model, holdMs, onProgress, signal) {
   });
 }
 
+/* ------------------------------------------------------------------- gif
+
+   NOT YET EXPOSED IN THE UI. The encoder below is wired and reachable via
+   `model.format = "gif"`, but a 26-cut reel at 1280x720 did not finish
+   encoding inside a reasonable wait during testing, so the chip is held back
+   rather than shipping a control that can lock the tab. The likely fixes, in
+   order: quantize at a smaller size, share one palette across frames instead
+   of computing 256 colours per frame, and move the whole thing to a worker so
+   it cannot block the UI at all.
+
+   One GIF frame per cut rather than per 30fps tick. A GIF's delay is stored
+   per frame in centiseconds, so the cut rhythm maps onto it directly and a
+   twenty-six cut reel is twenty-six frames instead of two hundred — which is
+   the difference between a few hundred kilobytes and something unusable.
+
+   Capped at 720 on the short edge whatever quality is set: GIF is 256 colours
+   and uncompressed between frames, so a 4K one would run to hundreds of
+   megabytes and no one would thank us for it. */
+const GIF_MAX_SHORT = 720;
+
+function gifSize(model) {
+  const full = outputSize(model);
+  const short = Math.min(full.w, full.h);
+  if (short <= GIF_MAX_SHORT) return full;
+  const k = GIF_MAX_SHORT / short;
+  const even = (n) => Math.round((n * k) / 2) * 2;
+  return { w: even(full.w), h: even(full.h) };
+}
+
+async function encodeGif(model, holdMs, onProgress, signal) {
+  const { w, h } = gifSize(model);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
+
+  const gif = GIFEncoder();
+  const cuts = model.cuts && model.cuts.length === model.frames.length ? model.cuts : null;
+
+  for (let i = 0; i < model.frames.length; i++) {
+    if (signal && signal.aborted) throw new Error("Export cancelled.");
+    renderFrame(ctx, w, h, model.frames[i], model);
+
+    const { data } = ctx.getImageData(0, 0, w, h);
+    /* Palette per frame: these reels swap between near-black and near-white
+       plates, and one shared palette would band both. */
+    const palette = quantize(data, 256);
+    const index = applyPalette(data, palette);
+
+    const next = cuts
+      ? (i + 1 < cuts.length ? cuts[i + 1] : cuts[i] + holdMs)
+      : (i + 1) * holdMs;
+    const ms = Math.max(20, next - (cuts ? cuts[i] : i * holdMs));
+
+    gif.writeFrame(index, w, h, { palette, delay: Math.round(ms / 10) * 10 });
+    if (onProgress) onProgress((i + 1) / model.frames.length);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
+  gif.finish();
+  const total = (cuts ? cuts[cuts.length - 1] + holdMs : model.frames.length * holdMs) / 1000;
+  return {
+    blob: new Blob([gif.bytes()], { type: "image/gif" }),
+    ext: "gif",
+    seconds: total,
+    audio: false,
+  };
+}
+
 /* ----------------------------------------------------------------- entry */
 
 export async function exportReel(model, holdMs, onProgress, signal) {
   if (!model.frames.length) throw new Error("There are no frames to export.");
+
+  if (model.format === "gif") return encodeGif(model, holdMs, onProgress, signal);
+  /* WebM is a deliberate choice as well as a fallback, so honour it. */
+  if (model.format === "webm") return encodeWebm(model, holdMs, onProgress, signal);
+
   if (canEncodeMp4() && window.Mp4Muxer) {
     try {
       return await encodeMp4(model, holdMs, onProgress, signal);

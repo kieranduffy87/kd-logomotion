@@ -9,7 +9,10 @@ import {
   fitBuffer, audioContext, bedSeconds, beatPhase, beatMap,
   holdForBpm, SUBDIVISIONS,
 } from "./audio.js";
-import { renderThumb, renderFrame, FRAME_W, FRAME_H, FX_DEFAULT, fxString, INK_MODES } from "./compositor.js";
+import {
+  renderThumb, renderFrame, FX_DEFAULT, fxString, INK_MODES,
+  ASPECTS, ASPECT_BY_ID, QUALITIES, frameSize,
+} from "./compositor.js";
 import { Player, SPEEDS, formatTime } from "./player.js";
 import { exportReel, download, canEncodeMp4, estimate } from "./export.js";
 
@@ -22,6 +25,9 @@ const model = {
   placement: { scale: 1, dx: 0, dy: 0, rotate: 0 },
   audio: null,          /* AudioBuffer fitted to the reel, or null */
   custom: new Map(),    /* id -> Image, backgrounds dropped onto single frames */
+  aspect: "9:16",
+  quality: "1080",
+  format: "mp4",
 };
 
 let customSeq = 0;
@@ -32,6 +38,25 @@ let exporting = null;     /* AbortController while an export runs */
 
 const preview = $("preview");
 const player = new Player(preview, () => model);
+
+/* ----------------------------------------------------------------- aspect */
+
+/* The preview canvas is re-sized to the chosen aspect at a fixed short edge.
+   Everything downstream reads its dimensions from the canvas it is handed, so
+   nothing else needs to know which shape the reel is. */
+const PREVIEW_SHORT = 540;
+
+function applyAspect() {
+  const size = frameSize(model.aspect, PREVIEW_SHORT);
+  preview.width = size.w;
+  preview.height = size.h;
+  preview.style.aspectRatio = `${size.w} / ${size.h}`;
+  thumbCache.clear();
+  document.querySelectorAll("[data-aspect]").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.aspect === model.aspect);
+  });
+  document.querySelector(".frames").classList.toggle("frames--wide", ASPECT_BY_ID[model.aspect].ratio >= 1);
+}
 
 /* ---------------------------------------------------------------- theme */
 
@@ -228,6 +253,55 @@ $("gReset").addEventListener("click", () => {
     renderFrames();
   }, { passive: false });
 })();
+
+/* ------------------------------------------------------------ output */
+
+const aspectWrap = $("aspects");
+ASPECTS.forEach((a) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "kd-chip";
+  b.textContent = a.label;
+  b.dataset.aspect = a.id;
+  b.addEventListener("click", async () => {
+    model.aspect = a.id;
+    applyAspect();
+    await loadPlatesFor(model.frames, model.aspect);
+    refreshAll();
+  });
+  aspectWrap.appendChild(b);
+});
+
+const qualityWrap = $("qualities");
+QUALITIES.forEach((q) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "kd-chip";
+  b.textContent = q.label;
+  b.dataset.quality = q.id;
+  b.addEventListener("click", () => {
+    model.quality = q.id;
+    syncOutput();
+  });
+  qualityWrap.appendChild(b);
+});
+
+document.querySelectorAll("[data-format]").forEach((b) => {
+  b.addEventListener("click", () => {
+    model.format = b.dataset.format;
+    syncOutput();
+  });
+});
+
+function syncOutput() {
+  qualityWrap.querySelectorAll("[data-quality]").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.quality === model.quality);
+  });
+  document.querySelectorAll("[data-format]").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.format === model.format);
+  });
+  syncExportNote();
+}
 
 /* ----------------------------------------------------------- soundtrack */
 
@@ -1073,10 +1147,17 @@ const exportLabel = exportBtn.querySelector(".export__label");
 
 function syncExportNote() {
   const est = estimate(model.frames.length, player.holdMs, model.cuts);
+  const q = QUALITIES.find((x) => x.id === model.quality) || QUALITIES[1];
+  const size = frameSize(model.aspect, q.short);
   const mp4 = canEncodeMp4() && window.Mp4Muxer;
-  const bits = [`1080 × 1920`, `${est.seconds.toFixed(1)}s`, mp4 ? "MP4" : "WebM"];
-  if (model.audio) bits.push(mp4 ? "with sound" : "sound needs MP4");
-  if (!mp4) bits.push("no MP4 encoder in this browser");
+  const wantsMp4 = model.format === "mp4";
+
+  const bits = [`${size.w} × ${size.h}`, `${est.seconds.toFixed(1)}s`];
+  bits.push(wantsMp4 ? (mp4 ? "MP4" : "WebM — no MP4 encoder here") : model.format.toUpperCase());
+  if (model.format === "gif" && Math.min(size.w, size.h) > 720) {
+    bits[0] = "capped to 720 · " + bits[0];
+  }
+  if (model.audio) bits.push(wantsMp4 && mp4 ? "with sound" : "silent — sound needs MP4");
   $("exportNote").textContent = bits.join(" · ");
 }
 
@@ -1120,7 +1201,7 @@ $("resetBtn").addEventListener("click", () => {
   select(null);
   player.index = 0;
   refreshAll();
-  loadPlatesFor(model.frames);
+  loadPlatesFor(model.frames, model.aspect);
 });
 
 /* Space plays, arrows step — the shortcuts anyone editing video reaches for. */
@@ -1172,8 +1253,10 @@ async function boot() {
   /* Canvas has no font fallback story: draw only once the face is resident. */
   try { await document.fonts.load(`500 100px "Instrument Sans"`); } catch (_) {}
   try { await document.fonts.ready; } catch (_) {}
+  applyAspect();
+  syncOutput();
   syncSpeedChips();
-  loadPlatesFor(model.frames);
+  loadPlatesFor(model.frames, model.aspect);
 
   /* Start on the KD mark so the reel plays on arrival: the tool explains
      itself far better running than sitting on an empty dropzone. */
@@ -1191,4 +1274,4 @@ async function boot() {
 boot();
 
 /* Exposed so the reel can be driven from the console or a recorder page. */
-window.KDLogomotion = { model, player, renderFrame, FRAME_W, FRAME_H, loadLogo, makeFrame };
+window.KDLogomotion = { model, player, renderFrame, frameSize, loadLogo, makeFrame };

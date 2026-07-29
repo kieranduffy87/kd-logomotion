@@ -624,3 +624,9 @@ body {
   background: none;
   cursor: pointer;
 }
+
+/* Frame-list thumbnails follow the reel's shape, so a wide reel gets wide
+   thumbs rather than tall ones with the picture squeezed inside. */
+.frame-row__thumb { width: 30px; height: 53px; }
+.frames--wide .frame-row__thumb { width: 56px; height: 32px; }
+.frames--wide .frame-row__thumb canvas { width: 100%; height: 100%; }

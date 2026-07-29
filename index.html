@@ -132,6 +132,18 @@
   </section>
 
   <aside class="rail rail--right">
+    <section class="panel">
+      <p class="kd-label">Shape</p>
+      <div class="chips" id="aspects" role="group" aria-label="Aspect ratio"></div>
+      <p class="kd-label editor__sub">Size</p>
+      <div class="chips" id="qualities" role="group" aria-label="Resolution"></div>
+      <p class="kd-label editor__sub">Format</p>
+      <div class="chips" role="group" aria-label="File format">
+        <button class="kd-chip is-active" type="button" data-format="mp4">MP4</button>
+        <button class="kd-chip" type="button" data-format="webm">WebM</button>
+      </div>
+    </section>
+
     <button class="kd-btn export" id="exportBtn" type="button">Download video</button>
     <p class="kd-muted note export-note" id="exportNote"></p>
 

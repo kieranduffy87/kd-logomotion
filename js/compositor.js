@@ -5,6 +5,35 @@ import { SCENE_BY_ID, PALETTE, FONT } from "./scenes.js";
 import { PLATE_BY_ID, plateImage, plateFailed } from "./plates.js";
 import { drawWarped, scaleQuad, quadPath, rotatedSource } from "./warp.js";
 
+/* Aspect is a property of the reel, not a constant. Everything downstream
+   works off the frame it is handed, so the same scene code paints a tall reel,
+   a wide one or a square one. */
+export const ASPECTS = [
+  { id: "9:16", label: "9:16", ratio: 9 / 16 },
+  { id: "1:1",  label: "1:1",  ratio: 1 },
+  { id: "16:9", label: "16:9", ratio: 16 / 9 },
+];
+
+export const ASPECT_BY_ID = Object.fromEntries(ASPECTS.map((a) => [a.id, a]));
+
+/* Long edge per quality tier; the short edge follows the aspect. 4K here means
+   2160 on the short edge for a vertical reel, which is what "4K vertical"
+   means in practice. */
+export const QUALITIES = [
+  { id: "720",  label: "720p",  short: 720 },
+  { id: "1080", label: "1080p", short: 1080 },
+  { id: "2160", label: "4K",    short: 2160 },
+];
+
+export function frameSize(aspectId, short) {
+  const a = ASPECT_BY_ID[aspectId] || ASPECT_BY_ID["9:16"];
+  /* Even dimensions, because H.264 will not encode odd ones. */
+  const even = (n) => Math.round(n / 2) * 2;
+  return a.ratio >= 1
+    ? { w: even(short * a.ratio), h: even(short) }
+    : { w: even(short), h: even(short / a.ratio) };
+}
+
 export const FRAME_W = 1080;
 export const FRAME_H = 1920;
 
@@ -12,6 +41,17 @@ export const FRAME_H = 1920;
    centre and identical, and only the background changes underneath. Holding it
    still is the whole effect: the cut reads because nothing about the mark
    moves, so the eye has nothing to track except the world behind it. */
+/* Sized against the frame's short edge rather than its width. A box defined
+   as a fraction of width would leave the mark tiny in a tall reel and
+   enormous in a wide one; against the short edge it holds the same visual
+   weight at every aspect. */
+export const LOCK_FRACTION = 0.52;
+
+export function lockBox(W, H) {
+  const unit = Math.min(W, H);
+  return { w: (unit * LOCK_FRACTION) / W, h: (unit * LOCK_FRACTION * 0.56) / H };
+}
+
 export const LOCK_BOX = { w: 0.44, h: 0.24 };
 
 /* One scratch layer, reused. Photographic plates need the mark composited
@@ -165,7 +205,7 @@ function renderPlateBackground(ctx, W, H, frame, state) {
   const plate = PLATE_BY_ID[frame.plate];
   if (!plate) return;
 
-  const img = plateImage(frame.plate);
+  const img = plateImage(frame.plate, state.aspect);
   /* Background plates carry no surface, so there is no quad to scale. */
   const quad = plate.quad ? scaleQuad(plate.quad, W, H) : null;
 
@@ -177,13 +217,16 @@ function renderPlateBackground(ctx, W, H, frame, state) {
     ctx.font = `500 ${Math.round(W * 0.03)}px ${FONT}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(plateFailed(frame.plate) ? `${plate.name} failed to load` : `Loading ${plate.name}…`,
+    ctx.fillText(plateFailed(frame.plate, state.aspect) ? `${plate.name} failed to load` : `Loading ${plate.name}…`,
       W / 2, H / 2);
     ctx.textAlign = "left";
     return;
   }
 
-  ctx.drawImage(img, 0, 0, W, H);
+  /* Cover-fit, never stretch. A 9:16 shot standing in for a square frame has
+     to be cropped, not squashed — squashing is instantly visible on anything
+     with a straight edge or a face in it. */
+  drawCover(ctx, W, H, img);
 
   const logo = state.logo;
 
@@ -252,7 +295,7 @@ function stampLocked(ctx, W, H, frame, state, ink, blend) {
   const place = placementOf(frame, state);
 
   if (!logo) {
-    placeholder(ctx, W, H, { cx: 0.5, cy: 0.5, ...LOCK_BOX }, ink);
+    placeholder(ctx, W, H, { cx: 0.5, cy: 0.5, ...lockBox(W, H) }, ink);
     return;
   }
 
@@ -280,8 +323,9 @@ function stampLocked(ctx, W, H, frame, state, ink, blend) {
     return;
   }
 
-  const w = LOCK_BOX.w * W * place.scale;
-  const h = LOCK_BOX.h * H * place.scale;
+  const box = lockBox(W, H);
+  const w = box.w * W * place.scale;
+  const h = box.h * H * place.scale;
   stampLogo(
     ctx, logo,
     (0.5 + place.dx) * W - w / 2,
@@ -333,8 +377,9 @@ export function resolveInk(frame, state, auto) {
 
 export function lockedRect(W, H, frame, state) {
   const place = placementOf(frame, state);
-  const bw = LOCK_BOX.w * W * place.scale;
-  const bh = LOCK_BOX.h * H * place.scale;
+  const lb = lockBox(W, H);
+  const bw = lb.w * W * place.scale;
+  const bh = lb.h * H * place.scale;
   const bx = (0.5 + place.dx) * W - bw / 2;
   const by = (0.5 + place.dy) * H - bh / 2;
   const logo = state.logo;
@@ -345,12 +390,16 @@ export function lockedRect(W, H, frame, state) {
 
 /* A background the user dropped onto one frame. Cover-fitted, because their
    photo will not be 9:16 and letterboxing it would look like a mistake. */
-function drawCustom(ctx, W, H, img) {
-  const ratio = img.naturalWidth / img.naturalHeight;
+function drawCover(ctx, W, H, img) {
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  const ratio = iw / ih;
   let w = W, h = W / ratio;
   if (h < H) { h = H; w = H * ratio; }
   ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
 }
+
+const drawCustom = drawCover;
 
 export function renderFrame(ctx, W, H, frame, state) {
   const fx = hasFx(frame.fx);
@@ -399,6 +448,9 @@ function renderSceneBackground(ctx, W, H, frame, state) {
     dominant: logo ? logo.dominant : PALETTE.blue,
     logoName: logo ? logo.name : "",
     anchorCount: anchorTotal(logo),
+    /* 'tall' | 'square' | 'wide' — scenes branch their layout on this rather
+       than rescaling a portrait composition into a landscape frame. */
+    shape: W / H > 1.2 ? "wide" : W / H < 0.85 ? "tall" : "square",
     brand: logo && logo.palette.length ? logo.palette : null,
     /* Plates that lay the mark out themselves (tiles, marquee) use this. The
        frame's placement is folded into every stamp relative to its own box, so
@@ -487,15 +539,11 @@ function paintMark(ctx, W, H, frame, state, isCustom) {
 /* Small square used by the frame list. Rendered from the same path so the
    thumbnail can never drift from the real output. */
 export function renderThumb(frame, state, size = 96) {
+  const a = ASPECT_BY_ID[state.aspect] || ASPECT_BY_ID["9:16"];
   const c = document.createElement("canvas");
-  c.width = Math.round(size * (FRAME_W / FRAME_H));
-  c.height = size;
+  if (a.ratio >= 1) { c.width = Math.round(size * a.ratio); c.height = size; }
+  else { c.width = Math.round(size * a.ratio); c.height = size; }
   const ctx = c.getContext("2d");
-  const scaleW = c.width;
-  const scaleH = c.height;
-  ctx.save();
-  ctx.scale(scaleW / FRAME_W, scaleH / FRAME_H);
-  renderFrame(ctx, FRAME_W, FRAME_H, frame, state);
-  ctx.restore();
+  renderFrame(ctx, c.width, c.height, frame, state);
   return c;
 }

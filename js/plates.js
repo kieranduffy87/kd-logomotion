@@ -16,6 +16,18 @@
 
 export const PLATE_DIR = "plates/";
 
+/* Each background is shot at every aspect rather than cropped to fit. A 9:16
+   rim-lit portrait cropped to 16:9 is a sliver of itself: the composition was
+   built for a tall frame and there is nothing in the sides to reveal. Files
+   are suffixed by aspect; `plateFile` picks the right one. */
+export const ASPECT_SUFFIX = { "9:16": "", "16:9": "-w", "1:1": "-s" };
+
+export function plateFile(plate, aspect) {
+  const suffix = ASPECT_SUFFIX[aspect] || "";
+  if (!suffix) return plate.file;
+  return plate.file.replace(/\.jpg$/, `${suffix}.jpg`);
+}
+
 /* Backgrounds. These carry no printable surface — the mark sits over them,
    locked to centre like every other frame, and the photograph's only job is to
    change the world behind it.
@@ -161,18 +173,21 @@ export const PLATE_BY_ID = Object.fromEntries(PLATES.map((p) => [p.id, p]));
 const cache = new Map();
 const listeners = new Set();
 
+const keyFor = (id, aspect) => `${id}|${aspect || "9:16"}`;
+
 export function onPlateLoad(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
-export function plateImage(id) {
-  const entry = cache.get(id);
+export function plateImage(id, aspect) {
+  const entry = cache.get(keyFor(id, aspect));
   return entry && entry.img ? entry.img : null;
 }
 
-export function loadPlate(id) {
-  if (cache.has(id)) return cache.get(id).promise;
+export function loadPlate(id, aspect = "9:16") {
+  const key = keyFor(id, aspect);
+  if (cache.has(key)) return cache.get(key).promise;
 
   const plate = PLATE_BY_ID[id];
   if (!plate) return Promise.resolve(null);
@@ -187,23 +202,34 @@ export function loadPlate(id) {
       resolve(img);
     };
     img.onerror = () => {
+      /* No dedicated file for this aspect yet: fall back to the 9:16 shot
+         rather than leaving a hole in the reel. */
+      if (aspect !== "9:16") {
+        loadPlate(id, "9:16").then((fallback) => {
+          entry.img = fallback;
+          entry.failed = !fallback;
+          listeners.forEach((fn) => fn(id));
+          resolve(fallback);
+        });
+        return;
+      }
       entry.failed = true;
       listeners.forEach((fn) => fn(id));
       resolve(null);
     };
-    img.src = PLATE_DIR + plate.file;
+    img.src = PLATE_DIR + plateFile(plate, aspect);
   });
 
-  cache.set(id, entry);
+  cache.set(key, entry);
   return entry.promise;
 }
 
-export function loadPlatesFor(frames) {
+export function loadPlatesFor(frames, aspect) {
   const ids = [...new Set(frames.filter((f) => f.plate).map((f) => f.plate))];
-  return Promise.all(ids.map(loadPlate));
+  return Promise.all(ids.map((id) => loadPlate(id, aspect)));
 }
 
-export function plateFailed(id) {
-  const entry = cache.get(id);
+export function plateFailed(id, aspect) {
+  const entry = cache.get(keyFor(id, aspect));
   return !!(entry && entry.failed);
 }
