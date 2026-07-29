@@ -5,7 +5,8 @@ import { SCENES, defaultFrames, makeFrame, makePlateFrame, frameLabel, PALETTE }
 import { PLATES, loadPlatesFor, onPlateLoad } from "./plates.js";
 import {
   BEDS, BED_BY_ID, renderBed, decodeFile, detectBpm,
-  fitBuffer, audioContext, bedSeconds,
+  fitBuffer, audioContext, bedSeconds, beatPhase, beatTimes,
+  holdForBpm, SUBDIVISIONS,
 } from "./audio.js";
 import { renderThumb, renderFrame, FRAME_W, FRAME_H, FX_DEFAULT, fxString } from "./compositor.js";
 import { Player, SPEEDS, formatTime } from "./player.js";
@@ -240,34 +241,34 @@ function currentBpm() {
   return bed ? bed.bpm : null;
 }
 
-/* The track is the clock.
+/* Beat detection drives the cut.
 
-   Logomotion's reel is exactly as long as its backing loop, and the frames
-   divide that length evenly — twenty-eight cuts across a 5.4s track is 194ms
-   each, which at its tempo is 2.81 cuts per beat. So the cuts are not sitting
-   on a beat grid at all. What sells the sync is that the loop is short and
-   rhythmic and the picture ends precisely with the music.
+   The reel's rhythm comes from the music: a preset knows its own tempo, and
+   an uploaded track is analysed for one. Knowing the tempo is only half of
+   it, though — a grid at the right BPM but the wrong phase puts every cut
+   exactly off the beat, so the onset envelope is also correlated against a
+   pulse train to find where the downbeat actually falls. */
+let subdivision = 2;
 
-   Replicated here: load a track and it takes over the timing. Adding frames
-   cuts faster, removing them cuts slower, and the reel always lands with the
-   last bar. */
 function rebuildCuts() {
-  if (!model.audio || !model.frames.length) { model.cuts = null; return; }
-  const total = model.audio.duration * 1000;
-  const step = total / model.frames.length;
-  model.cuts = model.frames.map((_, i) => Math.round(i * step));
+  const bpm = currentBpm();
+  if (!bpm || !model.frames.length) { model.cuts = null; return; }
+
+  const step = holdForBpm(bpm, subdivision);
+  const phase = userTrack ? beatPhase(userTrack, bpm) * 1000 : 0;
+  model.cuts = model.frames.map((_, i) => Math.round(phase + i * step));
   player.setHold(Math.round(step));
 }
 
 async function rebuildAudio() {
-  if (userTrack) model.audio = userTrack;
-  else if (bedId) {
-    const bed = BED_BY_ID[bedId];
-    model.audio = await renderBed(bedId, bed.bpm, bedSeconds(bed.bpm));
-  } else {
-    model.audio = null;
-  }
   rebuildCuts();
+  /* Match the exported length, so the bed ends where the picture does. */
+  const seconds = estimate(model.frames.length, player.holdMs, model.cuts).seconds;
+
+  if (userTrack) model.audio = fitBuffer(userTrack, seconds);
+  else if (bedId) model.audio = await renderBed(bedId, BED_BY_ID[bedId].bpm, seconds);
+  else model.audio = null;
+
   syncBedNote();
   syncSpeedChips();
   syncTransport();
@@ -353,29 +354,43 @@ SPEEDS.forEach((s) => {
   b.className = "kd-chip";
   b.textContent = s.label;
   b.dataset.ms = String(s.ms);
-  b.addEventListener("click", () => {
-    if (model.audio) return;      /* the track owns the timing */
+  b.addEventListener("click", async () => {
     player.setHold(s.ms);
-    syncSpeedChips();
-    syncTransport();
+    if (currentBpm()) {
+      /* With music loaded the chips choose how finely the beat is divided:
+         whichever subdivision lands closest to the speed just asked for. */
+      subdivision = SUBDIVISIONS.reduce((best, cand) => {
+        const d = Math.abs(holdForBpm(currentBpm(), cand.id) - s.ms);
+        return !best || d < best.d ? { id: cand.id, d } : best;
+      }, null).id;
+      await rebuildAudio();
+    } else {
+      syncSpeedChips();
+      syncTransport();
+    }
   });
   speedWrap.appendChild(b);
 });
 
 function syncSpeedChips() {
-  const locked = !!model.audio;
+  const bpm = currentBpm();
+  /* Mark whichever chip is nearest the current cut length, so the active
+     state still means something once the beat grid has rounded it. */
+  let nearest = null;
   speedWrap.querySelectorAll(".kd-chip").forEach((b) => {
-    b.classList.toggle("is-active", !locked && Number(b.dataset.ms) === player.holdMs);
-    b.disabled = locked;
+    const d = Math.abs(Number(b.dataset.ms) - player.holdMs);
+    if (!nearest || d < nearest.d) nearest = { el: b, d };
   });
-  if (locked) {
-    $("beatNote").textContent =
-      `Locked to the track · ${player.holdMs}ms per cut · ${formatTime(player.duration)}. ` +
-      `Add or remove frames to cut faster or slower.`;
-    return;
-  }
-  $("beatNote").textContent =
-    `${player.holdMs}ms per cut · ${formatTime(player.duration)} total · silent`;
+  speedWrap.querySelectorAll(".kd-chip").forEach((b) => {
+    b.classList.toggle("is-active", nearest && b === nearest.el);
+    b.disabled = false;
+  });
+
+  const label = SUBDIVISIONS.find((x) => x.id === subdivision);
+  $("beatNote").textContent = bpm
+    ? `${player.holdMs}ms per cut · ${formatTime(player.duration)} · ` +
+      `${label ? label.label : ""} note at ${bpm} BPM`
+    : `${player.holdMs}ms per cut · ${formatTime(player.duration)} total · silent`;
 }
 
 /* ------------------------------------------------------------ transport */
@@ -949,13 +964,10 @@ window.addEventListener("keydown", (e) => {
 /* ------------------------------------------------------------------ boot */
 
 function refreshAll() {
-  /* The frame count divides the track, so adding or removing a frame changes
-     how fast the reel cuts — re-derive the grid before anything redraws. */
   rebuildCuts();
   player.refresh();
   renderFrames();
   syncTransport();
-  syncSpeedChips();
 }
 
 /* Plates arrive one at a time; each one repaints its own thumbnails and the

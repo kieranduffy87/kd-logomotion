@@ -16,7 +16,52 @@ export function audioContext() {
   return ctx;
 }
 
-/* ------------------------------------------------------------- synthesis */
+/* ------------------------------------------------------------- synthesis
+
+   Everything runs through a mix bus rather than straight at the destination:
+   a saturator for glue, a compressor behind it, and a ducking gain that the
+   bass sits behind so every kick pushes it out of the way. That sidechain
+   pump is most of what separates something that sounds produced from
+   something that sounds like a test tone. */
+
+function softClip() {
+  const n = 1024;
+  const curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = Math.tanh(x * 1.9) / Math.tanh(1.9);
+  }
+  return curve;
+}
+
+function makeBus(oc) {
+  const master = oc.createGain();
+  master.gain.value = 0.9;
+
+  const drive = oc.createWaveShaper();
+  drive.curve = softClip();
+  drive.oversample = "2x";
+
+  const glue = oc.createDynamicsCompressor();
+  glue.threshold.value = -14;
+  glue.ratio.value = 3;
+  glue.attack.value = 0.004;
+  glue.release.value = 0.18;
+
+  /* Rumble below the kick's fundamental is wasted headroom on a phone. */
+  const hp = oc.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 32;
+
+  master.connect(drive).connect(glue).connect(hp).connect(oc.destination);
+
+  /* Anything on this bus gets pushed down by each kick. */
+  const duck = oc.createGain();
+  duck.gain.value = 1;
+  duck.connect(master);
+
+  return { master, duck };
+}
 
 function noiseBuffer(oc, seconds) {
   const buf = oc.createBuffer(1, Math.ceil(seconds * oc.sampleRate), oc.sampleRate);
@@ -29,86 +74,168 @@ function noiseBuffer(oc, seconds) {
   return buf;
 }
 
-function kick(oc, at, gain = 1, drop = 48) {
+/* A kick with a body and a beater, which is what makes it read as a drum
+   rather than a sine blip: pitch sweeps down fast, and a filtered noise
+   transient sits on the front. */
+function kick(g, at, gain = 1, tune = 52) {
+  const { oc, bus, duck } = g;
   const o = oc.createOscillator();
-  const g = oc.createGain();
-  o.frequency.setValueAtTime(150, at);
-  o.frequency.exponentialRampToValueAtTime(drop, at + 0.11);
-  g.gain.setValueAtTime(0.0001, at);
-  g.gain.exponentialRampToValueAtTime(gain, at + 0.004);
-  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.26);
-  o.connect(g).connect(oc.destination);
-  o.start(at); o.stop(at + 0.3);
+  const amp = oc.createGain();
+  o.frequency.setValueAtTime(tune * 3.4, at);
+  o.frequency.exponentialRampToValueAtTime(tune, at + 0.055);
+  amp.gain.setValueAtTime(0.0001, at);
+  amp.gain.exponentialRampToValueAtTime(gain, at + 0.005);
+  amp.gain.exponentialRampToValueAtTime(0.0001, at + 0.34);
+  o.connect(amp).connect(bus);
+  o.start(at); o.stop(at + 0.38);
+
+  const click = oc.createBufferSource();
+  click.buffer = g.noise;
+  const cf = oc.createBiquadFilter();
+  cf.type = "bandpass"; cf.frequency.value = 1800; cf.Q.value = 0.8;
+  const cg = oc.createGain();
+  cg.gain.setValueAtTime(gain * 0.28, at);
+  cg.gain.exponentialRampToValueAtTime(0.0001, at + 0.022);
+  click.connect(cf).connect(cg).connect(bus);
+  click.start(at); click.stop(at + 0.05);
+
+  /* The pump: duck everything on the sidechain bus and let it breathe back. */
+  duck.gain.setValueAtTime(1, at);
+  duck.gain.linearRampToValueAtTime(0.28, at + 0.012);
+  duck.gain.linearRampToValueAtTime(1, at + 0.19);
 }
 
-function hat(oc, noise, at, gain = 0.16, len = 0.035) {
+function hat(g, at, gain = 0.16, len = 0.035, open = false) {
+  const { oc, bus } = g;
   const s = oc.createBufferSource();
-  s.buffer = noise;
+  s.buffer = g.noise;
+  s.playbackRate.value = 1.6;
   const hp = oc.createBiquadFilter();
-  hp.type = "highpass"; hp.frequency.value = 7000;
-  const g = oc.createGain();
-  g.gain.setValueAtTime(gain, at);
-  g.gain.exponentialRampToValueAtTime(0.0001, at + len);
-  s.connect(hp).connect(g).connect(oc.destination);
-  s.start(at); s.stop(at + len + 0.02);
-}
-
-function clap(oc, noise, at, gain = 0.3) {
-  const s = oc.createBufferSource();
-  s.buffer = noise;
+  hp.type = "highpass"; hp.frequency.value = open ? 6200 : 8200;
   const bp = oc.createBiquadFilter();
-  bp.type = "bandpass"; bp.frequency.value = 1600; bp.Q.value = 1.2;
-  const g = oc.createGain();
-  g.gain.setValueAtTime(0.0001, at);
-  g.gain.exponentialRampToValueAtTime(gain, at + 0.006);
-  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.16);
-  s.connect(bp).connect(g).connect(oc.destination);
-  s.start(at); s.stop(at + 0.2);
+  bp.type = "bandpass"; bp.frequency.value = 11000; bp.Q.value = 0.7;
+  const amp = oc.createGain();
+  amp.gain.setValueAtTime(gain, at);
+  amp.gain.exponentialRampToValueAtTime(0.0001, at + len);
+  s.connect(hp).connect(bp).connect(amp).connect(bus);
+  s.start(at); s.stop(at + len + 0.03);
 }
 
-function sub(oc, at, freq, len, gain = 0.3) {
+/* Three noise bursts a few milliseconds apart, which is how a clap reads as
+   a room full of hands rather than one. */
+function clap(g, at, gain = 0.3) {
+  const { oc, bus } = g;
+  [0, 0.011, 0.023].forEach((off, i) => {
+    const s = oc.createBufferSource();
+    s.buffer = g.noise;
+    const bp = oc.createBiquadFilter();
+    bp.type = "bandpass"; bp.frequency.value = 1500 + i * 260; bp.Q.value = 1.1;
+    const amp = oc.createGain();
+    const tail = i === 2 ? 0.19 : 0.05;
+    amp.gain.setValueAtTime(0.0001, at + off);
+    amp.gain.exponentialRampToValueAtTime(gain * (i === 2 ? 1 : 0.7), at + off + 0.003);
+    amp.gain.exponentialRampToValueAtTime(0.0001, at + off + tail);
+    s.connect(bp).connect(amp).connect(bus);
+    s.start(at + off); s.stop(at + off + tail + 0.03);
+  });
+}
+
+function snare(g, at, gain = 0.34) {
+  const { oc, bus } = g;
+  const body = oc.createOscillator();
+  const bAmp = oc.createGain();
+  body.type = "triangle";
+  body.frequency.setValueAtTime(210, at);
+  body.frequency.exponentialRampToValueAtTime(150, at + 0.09);
+  bAmp.gain.setValueAtTime(gain * 0.5, at);
+  bAmp.gain.exponentialRampToValueAtTime(0.0001, at + 0.11);
+  body.connect(bAmp).connect(bus);
+  body.start(at); body.stop(at + 0.14);
+  clap(g, at, gain);
+}
+
+/* Sawtooth through a lowpass, on the ducking bus so the kick owns the low end. */
+function bass(g, at, freq, len, gain = 0.26) {
+  const { oc, duck } = g;
   const o = oc.createOscillator();
-  const g = oc.createGain();
-  o.type = "sine";
-  o.frequency.setValueAtTime(freq, at);
-  g.gain.setValueAtTime(0.0001, at);
-  g.gain.exponentialRampToValueAtTime(gain, at + 0.02);
-  g.gain.setValueAtTime(gain, at + len - 0.05);
-  g.gain.exponentialRampToValueAtTime(0.0001, at + len);
-  o.connect(g).connect(oc.destination);
-  o.start(at); o.stop(at + len + 0.02);
+  o.type = "sawtooth";
+  o.frequency.value = freq;
+  const lp = oc.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.setValueAtTime(freq * 7, at);
+  lp.frequency.exponentialRampToValueAtTime(freq * 2.4, at + len * 0.7);
+  lp.Q.value = 6;
+  const amp = oc.createGain();
+  amp.gain.setValueAtTime(0.0001, at);
+  amp.gain.exponentialRampToValueAtTime(gain, at + 0.015);
+  amp.gain.setValueAtTime(gain, at + len - 0.06);
+  amp.gain.exponentialRampToValueAtTime(0.0001, at + len);
+  o.connect(lp).connect(amp).connect(duck);
+  o.start(at); o.stop(at + len + 0.03);
 }
 
-function drone(oc, at, freq, len, gain = 0.12) {
-  [freq, freq * 1.5, freq * 2.02].forEach((f, i) => {
+function pad(g, at, freq, len, gain = 0.1) {
+  const { oc, duck } = g;
+  [1, 1.5, 2.005, 3].forEach((mult, i) => {
     const o = oc.createOscillator();
-    const g = oc.createGain();
-    o.type = i === 2 ? "triangle" : "sine";
-    o.frequency.value = f;
-    g.gain.setValueAtTime(0.0001, at);
-    g.gain.linearRampToValueAtTime(gain / (i + 1), at + 0.8);
-    g.gain.setValueAtTime(gain / (i + 1), at + len - 1.2);
-    g.gain.linearRampToValueAtTime(0.0001, at + len);
-    o.connect(g).connect(oc.destination);
+    const amp = oc.createGain();
+    o.type = i % 2 ? "triangle" : "sine";
+    o.frequency.value = freq * mult;
+    o.detune.value = (i - 1.5) * 7;
+    amp.gain.setValueAtTime(0.0001, at);
+    amp.gain.linearRampToValueAtTime(gain / (i + 1.2), at + 0.9);
+    amp.gain.setValueAtTime(gain / (i + 1.2), at + len - 1.1);
+    amp.gain.linearRampToValueAtTime(0.0001, at + len);
+    o.connect(amp).connect(duck);
     o.start(at); o.stop(at + len + 0.05);
   });
 }
 
-/* --------------------------------------------------------------- the beds */
+/* A noise sweep across the bar line, the usual glue between phrases. */
+function riser(g, at, len, gain = 0.11) {
+  const { oc, bus } = g;
+  const s = oc.createBufferSource();
+  s.buffer = g.noise;
+  s.loop = true;
+  const bp = oc.createBiquadFilter();
+  bp.type = "bandpass"; bp.Q.value = 1.4;
+  bp.frequency.setValueAtTime(500, at);
+  bp.frequency.exponentialRampToValueAtTime(7000, at + len);
+  const amp = oc.createGain();
+  amp.gain.setValueAtTime(0.0001, at);
+  amp.gain.linearRampToValueAtTime(gain, at + len * 0.85);
+  amp.gain.exponentialRampToValueAtTime(0.0001, at + len);
+  s.connect(bp).connect(amp).connect(bus);
+  s.start(at); s.stop(at + len + 0.05);
+}
+
+/* --------------------------------------------------------------- the beds
+
+   Four styles, deliberately spread across the tempo range so the speed chips
+   have somewhere to go: 96, 124, 140 and 76 BPM. Swing is applied to the
+   off-beats where it suits the style, because a perfectly square grid is the
+   other thing that gives synthesis away. */
 
 export const BEDS = [
   {
     id: "pulse",
     name: "Pulse",
     bpm: 124,
-    note: "Four to the floor. Cuts land on every kick.",
-    build(oc, beats, spb, noise) {
-      for (let b = 0; b < beats; b++) {
-        const t = b * spb;
-        kick(oc, t, 0.9);
-        hat(oc, noise, t + spb / 2, 0.11);
-        if (b % 4 === 0) sub(oc, t, 55, spb * 3.6, 0.26);
-        if (b % 8 === 4) clap(oc, noise, t, 0.22);
+    note: "Four to the floor, sidechained bass.",
+    build(g, bars) {
+      const { spb } = g;
+      const root = [55, 55, 49, 58];
+      for (let bar = 0; bar < bars; bar++) {
+        const t0 = bar * spb * 4;
+        for (let b = 0; b < 4; b++) {
+          const t = t0 + b * spb;
+          kick(g, t, 0.95);
+          hat(g, t + spb * 0.5, b % 2 ? 0.13 : 0.09, 0.032);
+          hat(g, t + spb * 0.75, 0.06, 0.024);
+          if (b === 2) clap(g, t, 0.26);
+        }
+        bass(g, t0, root[bar % root.length], spb * 3.7, 0.24);
+        if (bar === bars - 1) riser(g, t0 + spb * 2, spb * 2, 0.1);
       }
     },
   },
@@ -116,50 +243,61 @@ export const BEDS = [
     id: "snap",
     name: "Snap",
     bpm: 96,
-    note: "Half-time, clap on the two and four.",
-    build(oc, beats, spb, noise) {
-      for (let b = 0; b < beats; b++) {
-        const t = b * spb;
-        if (b % 2 === 0) kick(oc, t, 0.85, 42);
-        if (b % 4 === 2) clap(oc, noise, t, 0.34);
-        hat(oc, noise, t + spb / 2, 0.09, 0.03);
-        if (b % 8 === 0) sub(oc, t, 49, spb * 3.4, 0.3);
+    note: "Half-time with swung hats and a fat snare.",
+    build(g, bars) {
+      const { spb } = g;
+      const swing = spb * 0.06;
+      for (let bar = 0; bar < bars; bar++) {
+        const t0 = bar * spb * 4;
+        kick(g, t0, 0.95, 46);
+        kick(g, t0 + spb * 1.75, 0.6, 46);
+        kick(g, t0 + spb * 2.5, 0.7, 46);
+        snare(g, t0 + spb * 2, 0.34);
+        for (let e = 0; e < 8; e++) {
+          const t = t0 + e * spb * 0.5 + (e % 2 ? swing : 0);
+          hat(g, t, e % 2 ? 0.07 : 0.11, 0.03, e === 6);
+        }
+        bass(g, t0, bar % 2 ? 44 : 49, spb * 1.6, 0.28);
+        bass(g, t0 + spb * 2.5, bar % 2 ? 55 : 58, spb * 1.2, 0.22);
       }
     },
   },
   {
     id: "strobe",
     name: "Strobe",
-    bpm: 150,
-    note: "Fast and mechanical. Every eighth is a cut.",
-    build(oc, beats, spb, noise) {
-      for (let b = 0; b < beats; b++) {
-        const t = b * spb;
-        kick(oc, t, 0.8, 55);
-        hat(oc, noise, t + spb * 0.5, 0.14, 0.022);
-        hat(oc, noise, t + spb * 0.75, 0.07, 0.018);
-        if (b % 4 === 0) sub(oc, t, 62, spb * 2, 0.2);
+    bpm: 140,
+    note: "Driving and mechanical, sixteenth hats.",
+    build(g, bars) {
+      const { spb } = g;
+      for (let bar = 0; bar < bars; bar++) {
+        const t0 = bar * spb * 4;
+        for (let b = 0; b < 4; b++) {
+          const t = t0 + b * spb;
+          kick(g, t, 0.9, 58);
+          for (let s = 1; s < 4; s++) hat(g, t + spb * 0.25 * s, s === 2 ? 0.12 : 0.06, 0.02);
+          if (b % 2 === 1) clap(g, t, 0.2);
+        }
+        bass(g, t0, 62, spb * 1.9, 0.2);
+        bass(g, t0 + spb * 2, 82, spb * 1.9, 0.16);
       }
     },
   },
   {
     id: "hum",
     name: "Hum",
-    bpm: 84,
-    note: "Ambient bed with a soft mallet on the beat.",
-    build(oc, beats, spb, noise) {
-      drone(oc, 0, 65.4, beats * spb, 0.14);
-      for (let b = 0; b < beats; b++) {
-        const t = b * spb;
-        const o = oc.createOscillator();
-        const g = oc.createGain();
-        o.type = "sine";
-        o.frequency.value = b % 4 === 0 ? 523.25 : 392;
-        g.gain.setValueAtTime(0.0001, t);
-        g.gain.exponentialRampToValueAtTime(b % 4 === 0 ? 0.14 : 0.08, t + 0.01);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
-        o.connect(g).connect(oc.destination);
-        o.start(t); o.stop(t + 0.55);
+    bpm: 76,
+    note: "Slow ambient pad, a soft pulse underneath.",
+    build(g, bars) {
+      const { spb } = g;
+      const chords = [65.4, 61.7, 55, 58.3];
+      for (let bar = 0; bar < bars; bar++) {
+        const t0 = bar * spb * 4;
+        pad(g, t0, chords[bar % chords.length], spb * 4.2, 0.12);
+        for (let b = 0; b < 4; b++) {
+          const t = t0 + b * spb;
+          if (b % 2 === 0) kick(g, t, 0.42, 44);
+          hat(g, t + spb * 0.5, 0.045, 0.05, true);
+        }
       }
     },
   },
@@ -167,18 +305,18 @@ export const BEDS = [
 
 export const BED_BY_ID = Object.fromEntries(BEDS.map((b) => [b.id, b]));
 
-/* Render a bed to exactly the length the reel needs, at the reel's tempo. */
+/* Render a bed to the length the reel needs, at the reel's tempo. */
 export async function renderBed(id, bpm, seconds) {
   const bed = BED_BY_ID[id];
   if (!bed) return null;
 
   const length = Math.ceil(seconds * SR);
   const oc = new OfflineAudioContext(2, length, SR);
+  const { master, duck } = makeBus(oc);
   const spb = 60 / bpm;
-  const beats = Math.ceil(seconds / spb) + 1;
-  const noise = noiseBuffer(oc, 0.4);
+  const bars = Math.ceil(seconds / (spb * 4)) + 1;
 
-  bed.build(oc, beats, spb, noise);
+  bed.build({ oc, bus: master, duck, spb, noise: noiseBuffer(oc, 1.2) }, bars);
 
   const rendered = await oc.startRendering();
   return trimTail(rendered, seconds);
@@ -336,10 +474,13 @@ export function holdForBpm(bpm, subdivision) {
   return (60000 / bpm) / (subdivision || 1);
 }
 
+/* Four rungs so the four speed chips each land somewhere distinct at most
+   tempos — with only three, Slow and Beat collapsed onto the same one. */
 export const SUBDIVISIONS = [
   { id: 1, label: "1/1" },
   { id: 2, label: "1/2" },
   { id: 4, label: "1/4" },
+  { id: 8, label: "1/8" },
 ];
 
 /* Loop or clip a source buffer to the exact length of the reel. */

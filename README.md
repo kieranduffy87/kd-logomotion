@@ -142,27 +142,32 @@ lightness — a saturated blue is far darker than it looks.
 the thing being edited, so the control shows where every cut falls. Scrubbing
 snaps to a cut, because there is no meaningful position between two of them.
 
-**Sound** (`js/audio.js`) — **the track is the clock.** Load a soundtrack and
-the reel becomes exactly as long as it, with the frames dividing that length
-evenly. Adding a frame cuts faster, removing one cuts slower, and the picture
-always lands with the last bar. The speed control goes read-only while a track
-is loaded, because the track owns the timing.
+**Sound** (`js/audio.js`) — the music drives the cut. A preset knows its own
+tempo; an uploaded track is analysed for one with onset flux plus
+autocorrelation over the envelope.
 
-This is the model Logomotion uses, and it is worth being clear about why it
-works, because it is not what you would guess. Its reel is 28 cuts across a
-5.43s loop — 194ms each, which at that track's tempo is 2.81 cuts per beat. The
-cuts are not on a beat grid at all. What sells the sync is that the loop is
-short and rhythmic and the reel ends precisely with the music. Chasing exact
-beat alignment turned out to be solving a problem the format does not have.
+Knowing the tempo is only half of it. A grid at the right BPM but the wrong
+phase puts every cut exactly *off* the beat, so the onset envelope is also
+correlated against a pulse train at each candidate offset and the best-scoring
+phase wins (`beatPhase`). The cuts hang off that grid, and the exporter
+schedules from those same cut times so the alignment survives encoding.
 
-Four beds are synthesised in Web Audio (Pulse, Snap, Strobe, Hum), each
-rendered to a whole number of bars nearest five and a half seconds — whole bars
-because the bed is the clock and it loops, and a part-bar loop audibly stumbles
-every time it wraps. They carry no licensing risk, which a bundled commercial
-track would.
+The speed chips choose how finely the beat is divided — 1/1, 1/2, 1/4 or 1/8.
+Four rungs rather than three because with three, Slow and Beat collapsed onto
+the same subdivision at most tempos.
 
-You can also drop in your own file, and it becomes the clock in exactly the
-same way. Nothing is shipped that has not been generated here.
+Four beds are synthesised in Web Audio: Pulse (124), Snap (96), Strobe (140)
+and Hum (76), spread across the tempo range so the speed chips have somewhere
+to go. They run through a mix bus rather than straight at the destination — a
+saturator for glue, a compressor behind it, and a ducking gain the bass sits
+behind so every kick pushes it out of the way. That sidechain pump, plus swung
+off-beats and layered transients (a kick has a body *and* a beater; a clap is
+three noise bursts a few milliseconds apart), is most of what separates
+something that sounds produced from something that sounds like a test tone.
+
+Nothing third-party is bundled. Everything is generated in the browser, which
+is also why there is nothing to licence. Drop in your own file and it is
+analysed the same way.
 
 **Playback** (`js/player.js`) — with no soundtrack, 180ms per cut and the Slow /
 Beat / Fast / Strobe chips set the pace. With one, the track decides. Space
