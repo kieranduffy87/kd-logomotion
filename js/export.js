@@ -10,8 +10,20 @@ import { GIFEncoder, quantize, applyPalette } from "../vendor/gifenc.esm.js";
 const FPS = 30;
 const TICK_US = Math.round(1_000_000 / FPS);
 
-/* Ordered by preference: High 4.2, High 4.0, Main 4.0, Baseline 4.0. */
-const CODECS = ["avc1.64002a", "avc1.640028", "avc1.4d4028", "avc1.42e028"];
+/* Ordered lowest level first, because a lower level plays back on more
+   devices — but the list has to reach high enough for the biggest frame we
+   offer. H.264 levels cap frame size, and 4K needs 5.1: a list stopping at
+   4.2 (as this one did) supports 1080 fine and then finds nothing at all at
+   2160, which surfaces as "no H.264 encoder available" only at 4K.
+
+     4.0 / 4.2 → up to ~1080p      5.0 → up to ~1440p
+     5.1 → up to 4K                5.2 / 6.0 → beyond */
+const CODECS = [
+  "avc1.640028", "avc1.4d4028", "avc1.42e028",   /* High / Main / Baseline 4.0 */
+  "avc1.64002a",                                  /* High 4.2 */
+  "avc1.640032", "avc1.640033", "avc1.640034",    /* High 5.0 / 5.1 / 5.2 */
+  "avc1.64003c",                                  /* High 6.0 */
+];
 
 export function canEncodeMp4() {
   return typeof window.VideoEncoder === "function" && typeof window.VideoFrame === "function";
@@ -122,7 +134,10 @@ async function encodeMp4(model, holdMs, onProgress, signal) {
 
   const { w: FRAME_W, h: FRAME_H } = outputSize(model);
   const codec = await pickCodec(FRAME_W, FRAME_H);
-  if (!codec) throw new Error("This browser has no H.264 encoder available.");
+  if (!codec) {
+    throw new Error(
+      `No H.264 encoder here supports ${FRAME_W} \u00d7 ${FRAME_H}. Try a smaller size, or WebM.`);
+  }
 
   const bed = model.audio || null;
   const withAudio = bed && (await canEncodeAac(bed.sampleRate, bed.numberOfChannels));
