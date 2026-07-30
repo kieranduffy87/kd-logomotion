@@ -294,25 +294,49 @@ function traceContours(data, w, h) {
   return contours;
 }
 
-/* Douglas–Peucker: keep the vertices that carry the shape, drop the rest. */
-function simplify(points, eps) {
-  if (points.length < 3) return points;
-  let maxD = 0, idx = 0;
-  const [ax, ay] = points[0];
-  const [bx, by] = points[points.length - 1];
-  const dx = bx - ax, dy = by - ay;
-  const denom = Math.hypot(dx, dy) || 1;
+/* Douglas–Peucker: keep the vertices that carry the shape, drop the rest.
 
-  for (let i = 1; i < points.length - 1; i++) {
-    const [px, py] = points[i];
-    const d = Math.abs(dy * px - dx * py + bx * ay - by * ax) / denom;
-    if (d > maxD) { maxD = d; idx = i; }
+   Iterative, with an explicit stack of index ranges, rather than the natural
+   recursive formulation. The recursion depth is O(n) in the worst case — a
+   path where every point is a corner splits one vertex at a time — and a
+   detailed mark traces a contour of several thousand points, which overflows
+   the call stack and surfaces as "Maximum call stack size exceeded" on
+   upload. Marking keepers in a flag array also avoids spreading large arrays
+   back together, which has its own argument-count ceiling. */
+function simplify(points, eps) {
+  const n = points.length;
+  if (n < 3) return points.slice();
+
+  const keep = new Uint8Array(n);
+  keep[0] = 1;
+  keep[n - 1] = 1;
+
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const [from, to] = stack.pop();
+    if (to <= from + 1) continue;
+
+    const [ax, ay] = points[from];
+    const [bx, by] = points[to];
+    const dx = bx - ax, dy = by - ay;
+    const denom = Math.hypot(dx, dy) || 1;
+
+    let maxD = 0, idx = -1;
+    for (let i = from + 1; i < to; i++) {
+      const [px, py] = points[i];
+      const d = Math.abs(dy * px - dx * py + bx * ay - by * ax) / denom;
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+
+    if (maxD > eps && idx > 0) {
+      keep[idx] = 1;
+      stack.push([from, idx], [idx, to]);
+    }
   }
-  if (maxD <= eps) return [points[0], points[points.length - 1]];
-  return [
-    ...simplify(points.slice(0, idx + 1), eps).slice(0, -1),
-    ...simplify(points.slice(idx), eps),
-  ];
+
+  const out = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(points[i]);
+  return out;
 }
 
 /* Reduce a traced chain to the corners a designer would have drawn.
